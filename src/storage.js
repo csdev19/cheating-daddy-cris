@@ -23,6 +23,9 @@ const DEFAULT_CREDENTIALS = {
 const DEFAULT_PREFERENCES = {
     customPrompt: '',
     providerMode: 'byok',
+    // D14: ejes independientes. providerMode se conserva para migrar preferencias viejas.
+    transcription: 'local-whisper',
+    reasoning: 'gemini',
     selectedProfile: 'interview',
     selectedLanguage: 'en-US',
     selectedScreenshotInterval: '5',

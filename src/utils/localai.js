@@ -343,12 +343,12 @@ function removeNewLlamaCacheEntries() {
     }
 }
 
-async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
-    const binaryProgress = label => progress => {
-        sendToRenderer('update-status', formatDownloadStatus(label, progress));
-        sendDownloadProgress(label, progress);
-    };
+const binaryProgress = label => progress => {
+    sendToRenderer('update-status', formatDownloadStatus(label, progress));
+    sendDownloadProgress(label, progress);
+};
 
+async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
     sendDownloadProgress('Checking Llama runner');
     const llamaBinaryPath = await ensureNativeBinary('llama', binaryProgress('Llama runner'), signal);
 
@@ -439,6 +439,69 @@ async function startLlamaServer(executablePath, modelPath, projectorPath) {
     });
 
     await waitForServer(`${llamaBaseUrl}/health`, llamaProcess, 30 * 60 * 1000);
+}
+
+// D14: transcripción y razonamiento son ejes independientes. Antes ambos vivían
+// dentro de initializeLocalSession, así que usar Whisper obligaba a descargar y
+// cargar el LLM local aunque se fuera a razonar en la nube (hallazgo A1).
+async function startTranscription({ whisperModel }) {
+    initializationController = initializationController || new AbortController();
+    const signal = initializationController.signal;
+
+    sendDownloadProgress('Checking Whisper runner');
+    const whisperBinaryPath = await ensureNativeBinary('whisper', binaryProgress('Whisper runner'), signal);
+
+    sendToRenderer('whisper-downloading', true);
+    let whisperModelPath;
+    try {
+        sendDownloadProgress('Checking Whisper model');
+        whisperModelPath = await ensureWhisperModel(whisperModel, binaryProgress('Whisper model'), signal);
+    } finally {
+        sendToRenderer('whisper-downloading', false);
+    }
+
+    currentWhisperModel = whisperModel;
+
+    sendToRenderer('update-status', 'Starting Whisper...');
+    await startWhisperServer(whisperBinaryPath, whisperModelPath);
+
+    channels.them.reset();
+    channels.me.reset();
+    channelQueue.clear();
+
+    isLocalActive = true;
+    sendToRenderer('local-ai-download-progress', { active: false });
+    console.log('[LocalAI] Transcripción local lista con', whisperModel);
+    return true;
+}
+
+async function startLocalReasoning({ model, customPrompt }) {
+    initializationController = initializationController || new AbortController();
+    const signal = initializationController.signal;
+
+    sendDownloadProgress('Checking Llama runner');
+    const llamaBinaryPath = await ensureNativeBinary('llama', binaryProgress('Llama runner'), signal);
+
+    sendDownloadProgress('Checking language model');
+    const llamaFiles = await ensureLlamaModel(model, binaryProgress('Language model'), binaryProgress('Vision model'), signal);
+
+    sendToRenderer('update-status', 'Loading local language model...');
+    await startLlamaServer(llamaBinaryPath, llamaFiles.modelPath, llamaFiles.projectorPath);
+
+    llamaModel = model;
+    currentSystemPrompt = customPrompt || null;
+    localConversationHistory = [];
+    sendToRenderer('local-ai-download-progress', { active: false });
+    console.log('[LocalAI] Razonamiento local listo con', model);
+    return true;
+}
+
+function isTranscriptionActive() {
+    return isLocalActive && Boolean(whisperProcess);
+}
+
+function isReasoningActive() {
+    return Boolean(llamaProcess);
 }
 
 async function initializeLocalSession(model, whisperModel, profile, customPrompt) {
@@ -612,6 +675,10 @@ async function sendLocalImage(base64Data, prompt) {
 
 module.exports = {
     initializeLocalSession,
+    startTranscription,
+    startLocalReasoning,
+    isTranscriptionActive,
+    isReasoningActive,
     setTranscriptionHandler,
     cancelLocalInitialization,
     processLocalAudio,
