@@ -120,6 +120,26 @@ async function loadPreferencesCache() {
 // Initialize preferences cache
 loadPreferencesCache();
 
+// OfflineAudioContext aplica el filtro anti-aliasing que la interpolación lineal
+// del main process no hacía: al bajar de 24k a 16k sin paso-bajo, todo lo que está
+// por encima de 8 kHz se pliega hacia abajo y ensucia las sibilantes (hallazgo H7).
+async function resampleTo16k(float32Chunk, sourceRate) {
+    if (sourceRate === 16000) return float32Chunk;
+
+    const outputLength = Math.ceil((float32Chunk.length * 16000) / sourceRate);
+    const offline = new OfflineAudioContext(1, outputLength, 16000);
+    const buffer = offline.createBuffer(1, float32Chunk.length, sourceRate);
+    buffer.copyToChannel(float32Chunk, 0);
+
+    const source = offline.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offline.destination);
+    source.start();
+
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0);
+}
+
 function convertFloat32ToInt16(float32Array) {
     const int16Array = new Int16Array(float32Array.length);
     for (let i = 0; i < float32Array.length; i++) {
@@ -384,12 +404,13 @@ function setupLinuxMicProcessing(micStream) {
         // Process audio in chunks
         while (audioBuffer.length >= samplesPerChunk) {
             const chunk = audioBuffer.splice(0, samplesPerChunk);
-            const pcmData16 = convertFloat32ToInt16(chunk);
+            const resampled = await resampleTo16k(Float32Array.from(chunk), SAMPLE_RATE);
+            const pcmData16 = convertFloat32ToInt16(resampled);
             const base64Data = arrayBufferToBase64(pcmData16.buffer);
 
             await ipcRenderer.invoke('send-mic-audio-content', {
                 data: base64Data,
-                mimeType: 'audio/pcm;rate=24000',
+                mimeType: 'audio/pcm;rate=16000',
             });
         }
     };
@@ -417,12 +438,13 @@ function setupLinuxSystemAudioProcessing() {
         // Process audio in chunks
         while (audioBuffer.length >= samplesPerChunk) {
             const chunk = audioBuffer.splice(0, samplesPerChunk);
-            const pcmData16 = convertFloat32ToInt16(chunk);
+            const resampled = await resampleTo16k(Float32Array.from(chunk), SAMPLE_RATE);
+            const pcmData16 = convertFloat32ToInt16(resampled);
             const base64Data = arrayBufferToBase64(pcmData16.buffer);
 
             await ipcRenderer.invoke('send-audio-content', {
                 data: base64Data,
-                mimeType: 'audio/pcm;rate=24000',
+                mimeType: 'audio/pcm;rate=16000',
             });
         }
     };
@@ -447,12 +469,13 @@ function setupWindowsLoopbackProcessing() {
         // Process audio in chunks
         while (audioBuffer.length >= samplesPerChunk) {
             const chunk = audioBuffer.splice(0, samplesPerChunk);
-            const pcmData16 = convertFloat32ToInt16(chunk);
+            const resampled = await resampleTo16k(Float32Array.from(chunk), SAMPLE_RATE);
+            const pcmData16 = convertFloat32ToInt16(resampled);
             const base64Data = arrayBufferToBase64(pcmData16.buffer);
 
             await ipcRenderer.invoke('send-audio-content', {
                 data: base64Data,
-                mimeType: 'audio/pcm;rate=24000',
+                mimeType: 'audio/pcm;rate=16000',
             });
         }
     };

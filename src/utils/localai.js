@@ -69,32 +69,9 @@ const channelQueue = (() => {
 
 // Un canal = un VAD + su propio resto de resampleo. Compartirlos entre canales
 // corrompe el audio y mezcla los hablantes (ver Tarea 7 del plan).
+// Un canal = un VAD propio. El resampleo se hace ahora en el renderer con
+// OfflineAudioContext, que filtra correctamente (H7); aquí llega PCM16 a 16 kHz.
 function createChannel(speaker) {
-    let resampleRemainder = Buffer.alloc(0);
-
-    function resample24kTo16k(inputBuffer) {
-        const combined = Buffer.concat([resampleRemainder, inputBuffer]);
-        const inputSamples = Math.floor(combined.length / 2);
-        const outputSamples = Math.floor((inputSamples * 2) / 3);
-        const outputBuffer = Buffer.alloc(outputSamples * 2);
-
-        for (let i = 0; i < outputSamples; i++) {
-            const sourcePosition = (i * 3) / 2;
-            const sourceIndex = Math.floor(sourcePosition);
-            const fraction = sourcePosition - sourceIndex;
-            const firstSample = combined.readInt16LE(sourceIndex * 2);
-            const secondSample = sourceIndex + 1 < inputSamples ? combined.readInt16LE((sourceIndex + 1) * 2) : firstSample;
-            const interpolated = Math.round(firstSample + fraction * (secondSample - firstSample));
-            outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, interpolated)), i * 2);
-        }
-
-        const consumedInputSamples = Math.ceil((outputSamples * 3) / 2);
-        const remainderStart = consumedInputSamples * 2;
-        resampleRemainder = remainderStart < combined.length ? combined.slice(remainderStart) : Buffer.alloc(0);
-
-        return outputBuffer;
-    }
-
     const vad = createVad({
         // D20: 2 s de silencio en vez de 3, para bajar la latencia total.
         mode: { ...VAD_MODES.NORMAL, silenceFramesRequired: 20 },
@@ -102,12 +79,7 @@ function createChannel(speaker) {
         onSpeechEnd: audioData => channelQueue.push(speaker, audioData),
     });
 
-    function reset() {
-        resampleRemainder = Buffer.alloc(0);
-        vad.reset();
-    }
-
-    return { resample24kTo16k, vad, reset };
+    return { vad, reset: () => vad.reset() };
 }
 
 const channels = { them: createChannel('them'), me: createChannel('me') };
@@ -556,7 +528,7 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
     }
 }
 
-function processLocalAudio(monoChunk24k, speaker = 'them') {
+function processLocalAudio(pcm16k, speaker = 'them') {
     if (!isLocalActive) return;
 
     const channel = channels[speaker];
@@ -565,8 +537,7 @@ function processLocalAudio(monoChunk24k, speaker = 'them') {
         return;
     }
 
-    const pcm16k = channel.resample24kTo16k(monoChunk24k);
-    if (pcm16k.length > 0) {
+    if (pcm16k && pcm16k.length > 0) {
         channel.vad.process(pcm16k);
     }
 }
