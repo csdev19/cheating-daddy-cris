@@ -767,6 +767,11 @@ ipcRenderer.on('save-screen-analysis', async (event, data) => {
 });
 
 // Listen for emergency erase command from main process
+ipcRenderer.on('save-session-digest', async (event, { sessionId, digest }) => {
+    const existing = await cheatingDaddy.storage.getSession(sessionId);
+    await cheatingDaddy.storage.saveSession(sessionId, { ...(existing || {}), digest });
+});
+
 ipcRenderer.on('clear-sensitive-data', async () => {
     console.log('Clearing all data...');
     await storage.clearAll();

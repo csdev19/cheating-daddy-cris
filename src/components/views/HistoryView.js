@@ -245,6 +245,25 @@ export class HistoryView extends LitElement {
                 cursor: text;
             }
 
+            .session-digest {
+                border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+                border-radius: 8px;
+                padding: 12px 14px;
+                margin-bottom: 16px;
+                background: rgba(255, 255, 255, 0.03);
+            }
+            .session-digest-title {
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                opacity: 0.6;
+                margin-bottom: 6px;
+            }
+            .session-digest-body {
+                white-space: pre-wrap;
+                font-size: 13px;
+                line-height: 1.5;
+            }
             .empty {
                 color: var(--text-muted);
                 font-size: var(--font-size-sm);
@@ -372,11 +391,16 @@ export class HistoryView extends LitElement {
 
     collectConversation(session) {
         const messages = [];
-        const history = session.conversationHistory || [];
-        history.forEach(turn => {
-            if (turn.transcription) messages.push({ type: 'user', content: turn.transcription, timestamp: turn.timestamp });
-            if (turn.ai_response) messages.push({ type: 'ai', content: turn.ai_response, timestamp: turn.timestamp });
-        });
+        const events = session.events || [];
+        events
+            .filter(e => e.kind === 'speech' || e.kind === 'ask')
+            .forEach(e => {
+                if (e.kind === 'speech') {
+                    messages.push({ type: e.speaker === 'me' ? 'me' : 'them', content: e.text, timestamp: e.t });
+                } else if (e.answer) {
+                    messages.push({ type: 'ai', content: e.answer, timestamp: e.t });
+                }
+            });
         return messages;
     }
 
@@ -385,8 +409,18 @@ export class HistoryView extends LitElement {
 
         if (this.activeTab === 'conversation') {
             const messages = this.collectConversation(this.selectedSession);
-            if (!messages.length) return html`<div class="empty">No conversation data.</div>`;
-            return messages.map(
+            const digest = this.selectedSession.digest;
+            if (!messages.length && !digest) return html`<div class="empty">No conversation data.</div>`;
+
+            // El resumen va primero: normalmente es lo único que hace falta releer (M2).
+            const resumen = digest
+                ? html`<div class="session-digest">
+                      <div class="session-digest-title">Resumen</div>
+                      <div class="session-digest-body">${digest}</div>
+                  </div>`
+                : '';
+
+            return html`${resumen}${messages.map(
                 msg => html`
                     <div class="message-row ${msg.type}">
                         <div class="message">
@@ -395,11 +429,11 @@ export class HistoryView extends LitElement {
                         </div>
                     </div>
                 `
-            );
+            )}`;
         }
 
         if (this.activeTab === 'screen') {
-            const screen = this.selectedSession.screenAnalysisHistory || [];
+            const screen = (this.selectedSession.events || []).filter(e => e.kind === 'screen');
             if (!screen.length) return html`<div class="empty">No screen analysis data.</div>`;
             return screen.map(
                 entry => html`
@@ -490,7 +524,7 @@ export class HistoryView extends LitElement {
 
     renderDetailView() {
         const conversationCount = this.collectConversation(this.selectedSession).length;
-        const screenCount = this.selectedSession?.screenAnalysisHistory?.length || 0;
+        const screenCount = (this.selectedSession?.events || []).filter(e => e.kind === 'screen').length;
 
         return html`
             <div class="page-title">Session Detail</div>

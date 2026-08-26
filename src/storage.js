@@ -410,15 +410,19 @@ function saveSession(sessionId, data) {
         // Profile context - set once when session starts
         profile: data.profile || existingSession?.profile || null,
         customPrompt: data.customPrompt || existingSession?.customPrompt || null,
-        // Conversation data
-        conversationHistory: data.conversationHistory || existingSession?.conversationHistory || [],
-        screenAnalysisHistory: data.screenAnalysisHistory || existingSession?.screenAnalysisHistory || [],
+        // Hilo único de eventos (sustituye a conversationHistory + screenAnalysisHistory)
+        events: data.events || existingSession?.events || [],
+        digest: data.digest || existingSession?.digest || null,
     };
     return writeJsonFile(sessionPath, sessionData);
 }
 
 function getSession(sessionId) {
-    return readJsonFile(getSessionPath(sessionId), null);
+    const raw = readJsonFile(getSessionPath(sessionId), null);
+    if (!raw) return null;
+    // Las sesiones grabadas antes del hilo único se migran al leerlas.
+    const { migrateLegacySession } = require('./core/session-context-migrate');
+    return { ...raw, ...migrateLegacySession(raw) };
 }
 
 function getAllSessions() {
@@ -444,14 +448,16 @@ function getAllSessions() {
                 const sessionId = file.replace('.json', '');
                 const data = readJsonFile(path.join(historyDir, file), null);
                 if (data) {
+                    const { migrateLegacySession } = require('./core/session-context-migrate');
+                    const { events } = migrateLegacySession(data);
                     return {
                         sessionId,
                         createdAt: data.createdAt,
                         lastUpdated: data.lastUpdated,
-                        messageCount: data.conversationHistory?.length || 0,
-                        screenAnalysisCount: data.screenAnalysisHistory?.length || 0,
-                        profile: data.profile || null,
-                        customPrompt: data.customPrompt || null,
+                        messageCount: events.filter(e => e.kind === 'speech').length,
+                        screenAnalysisCount: events.filter(e => e.kind === 'screen').length,
+                        profile: data.profileName || data.profile || null,
+                        hasDigest: Boolean(data.digest),
                     };
                 }
                 return null;
