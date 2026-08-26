@@ -301,3 +301,40 @@ banco de pruebas como primer ajuste; añadir streaming de respuesta (B5).
 **Por qué:** el diseño reactivo lo implicaba pero nadie lo había sumado (C3).
 Sirve para "recordar una cifra", no para "qué digo ahora mismo" — y eso es
 coherente con D1: la app es memoria, no teleprompter.
+
+## D21 — Whisper local se confirma tras la auditoría (revisión de D3)
+
+**Decisión:** mantener Whisper local como transcriptor por defecto, con D14 aplicado.
+Gemini Live queda disponible como `transcription: 'gemini-live'`, no eliminado.
+
+**Por qué se puso en duda:** la auditoría descubrió (A1) que "modo local" en este repo
+significa _whisper **y** llama juntos_ — `initializeLocalSession` descarga Qwen (~2,5 GB)
+y arranca `llama-server` siempre. Con eso, elegir Whisper obligaba a tener ~17 GB de RAM
+ocupados por un LLM sin usar, en un Mac de 24 GB compartido con Meet y Chrome durante la
+entrevista. Ese sí era motivo suficiente para pasarse a Gemini Live.
+
+**Por qué se confirma igualmente:** el problema era del código, no de Whisper. Con D14
+el coste real de la transcripción local es el modelo (~1,6 GB) y un proceso. Nivelado el
+terreno, deciden tres cosas en este orden:
+
+1. **Robustez.** Lo que está siempre encendido debe ser lo que no falla. Gemini Live es
+   un WebSocket abierto 45 min y el repo ya tiene reconexión con 3 intentos _porque hacía
+   falta_. Perder el hilo a los 20 minutos es perder el producto entero.
+2. **Medibilidad.** Es lo que más pesa para la preocupación concreta (acentos): con
+   Whisper se graban 3 minutos y se comparan modelos sobre _el mismo archivo_ hasta tener
+   confianza. Con Gemini Live cada prueba es irrepetible y no hay parámetro que ajustar.
+3. **La ventaja de Gemini Live se evapora con dos canales.** Su diarización era el
+   atractivo; el etiquetado por origen físico (D6) ya lo cubre y con más fiabilidad.
+
+**Lo que se concede:**
+
+- La latencia total (6-9 s, D20) no la arregla cambiar de transcriptor: el grueso está en
+  el VAD y en el razonamiento, no en Whisper (1-2 s de esos).
+- **B10 sigue sin verificar.** Si el binario de `whisper-server` de los releases se
+  compiló sin Metal, `large-v3-turbo` en CPU puede subir a 4-6 s por segmento, lo que sería
+  inaceptable.
+
+**Criterio de reapertura, medido en la Tarea 12:** latencia por segmento de 10 s por
+debajo de ~4 s, y transcript legible con acento no nativo. Si falla, el primer remedio es
+cambiar de modelo (`medium.en`) o recompilar el binario — **no** cambiar de arquitectura.
+Solo si ambos fallan se reconsidera `gemini-live`.
