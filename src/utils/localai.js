@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn } = require('./gemini');
 const {
     normalizeWhisperModel,
@@ -512,7 +511,7 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         closeLocalSession();
         initializationController = new AbortController();
         llamaCacheSnapshot = getDirectoryEntries(path.join(getModelsDirectory(), 'llama'));
-        currentSystemPrompt = getSystemPrompt(profile, customPrompt, false);
+        currentSystemPrompt = customPrompt || '';
         llamaModel = model;
 
         const nativeFiles = await prepareNativeFiles(model, whisperModel, initializationController.signal);

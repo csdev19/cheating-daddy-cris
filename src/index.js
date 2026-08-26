@@ -19,6 +19,19 @@ app.whenReady().then(async () => {
     // Initialize storage (checks version, resets if needed)
     storage.initializeStorage();
 
+    // Los perfiles viven en disco como carpetas de markdown (D7). En el primer
+    // arranque se generan desde las plantillas y se conserva el customPrompt viejo.
+    try {
+        const { bootstrapProfiles } = require('./core/profiles-bootstrap');
+        const prefs = storage.getPreferences();
+        const creados = bootstrapProfiles({ configDir: storage.getConfigDir(), legacyCustomPrompt: prefs.customPrompt });
+        if (creados.length > 0) {
+            console.log('Perfiles creados:', creados.join(', '));
+        }
+    } catch (error) {
+        console.error('No se pudieron crear los perfiles por defecto:', error);
+    }
+
     // Trigger screen recording permission prompt on macOS if not already granted
     if (process.platform === 'darwin') {
         const { desktopCapturer } = require('electron');

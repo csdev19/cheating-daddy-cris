@@ -2,7 +2,6 @@ const { GoogleGenAI, Modality } = require('@google/genai');
 const { BrowserWindow, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const { saveDebugAudio } = require('../audioUtils');
-const { getSystemPrompt } = require('./prompts');
 const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, incrementCharUsage, getConfig } = require('../storage');
 const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud, isCloudActive, setOnTurnComplete } = require('./cloud');
 const { startTransportLog, logTransportEvent, closeTransportLog } = require('./transportLogger');
@@ -767,8 +766,10 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
     const enabledTools = await getEnabledTools();
     const googleSearchEnabled = enabledTools.some(tool => tool.googleSearch);
 
-    const systemPrompt = getSystemPrompt(profile, customPrompt, googleSearchEnabled);
-    currentSystemPrompt = systemPrompt; // Store for Groq
+    // Las instrucciones vienen del perfil del usuario (profile.md), no de los
+    // profilePrompts hardcodeados que se retiraron con la Tarea 11 (H6).
+    const systemPrompt = customPrompt || '';
+    currentSystemPrompt = systemPrompt;
 
     // Initialize new conversation session only on first connect
     if (!isReconnect) {

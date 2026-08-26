@@ -99,6 +99,7 @@ function getDefaultKeybinds() {
         toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
         toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
         nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
+        askNoScreen: isMac ? 'Cmd+Shift+Enter' : 'Ctrl+Shift+Enter',
         previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
         nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
         scrollUp: isMac ? 'Cmd+Shift+Up' : 'Ctrl+Shift+Up',
@@ -264,6 +265,16 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
         }
     }
 
+    // M4: atajo para preguntar sin adjuntar pantalla.
+    if (keybinds.askNoScreen) {
+        try {
+            globalShortcut.register(keybinds.askNoScreen, () => sendToRenderer('ask-no-screen'));
+            console.log(`Registered askNoScreen: ${keybinds.askNoScreen}`);
+        } catch (error) {
+            console.error(`Failed to register askNoScreen (${keybinds.askNoScreen}):`, error);
+        }
+    }
+
     // Register emergency erase shortcut
     if (keybinds.emergencyErase) {
         try {
@@ -275,6 +286,14 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
                     if (geminiSessionRef.current) {
                         geminiSessionRef.current.close();
                         geminiSessionRef.current = null;
+                    }
+
+                    // B7: clearAll() solo borraba el disco; el transcript vivía en
+                    // memoria del main hasta que moría el proceso.
+                    try {
+                        require('./gemini').endSessionForEmergency();
+                    } catch (error) {
+                        console.error('No se pudo limpiar la sesión en memoria:', error);
                     }
 
                     sendToRenderer('clear-sensitive-data');
