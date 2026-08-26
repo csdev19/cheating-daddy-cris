@@ -673,7 +673,37 @@ async function sendLocalImage(base64Data, prompt) {
     }
 }
 
+// Equivalente local del adaptador de proveedor: mismo payload neutro, servidor llama.cpp.
+async function sendLocalPayload(payload) {
+    if (!llamaProcess) {
+        throw new Error('No hay razonamiento local activo');
+    }
+
+    const content = [];
+    if (payload.transcript) {
+        content.push({ type: 'text', text: `Conversación hasta ahora:\n\n${payload.transcript}` });
+    }
+    if (payload.image) {
+        content.push({ type: 'image_url', image_url: { url: `data:${payload.image.mimeType};base64,${payload.image.data}` } });
+    }
+    content.push({ type: 'text', text: payload.question });
+
+    const messages = [
+        { role: 'system', content: payload.system },
+        { role: 'user', content },
+    ];
+
+    let isFirst = true;
+    const fullText = await requestLlama(messages, text => {
+        sendToRenderer(isFirst ? 'new-response' : 'update-response', text);
+        isFirst = false;
+    });
+
+    return fullText.trim();
+}
+
 module.exports = {
+    sendLocalPayload,
     initializeLocalSession,
     startTranscription,
     startLocalReasoning,

@@ -6,6 +6,9 @@ const { getSystemPrompt } = require('./prompts');
 const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, incrementCharUsage, getConfig } = require('../storage');
 const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud, isCloudActive, setOnTurnComplete } = require('./cloud');
 const { startTransportLog, logTransportEvent, closeTransportLog } = require('./transportLogger');
+const { createSessionManager } = require('../core/session');
+const { resolveModes } = require('../core/modes');
+const { getPreferences, getConfigDir } = require('../storage');
 
 // Lazy-loaded to avoid circular dependency (localai.js imports from gemini.js)
 let _localai = null;
@@ -58,6 +61,117 @@ let sessionParams = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAY = 2000;
+
+// Traduce el payload neutro a una petición de Gemini. El bloque `system` va primero
+// y sin variar durante la reunión: es el prefijo que se cachea.
+async function sendPayloadToGemini(payload) {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('Falta la API key de Gemini');
+
+    const model = payload.model || getConfig().geminiLiveModel || 'gemini-2.5-flash';
+    const client = new GoogleGenAI({ apiKey });
+
+    const parts = [];
+    if (payload.transcript) {
+        parts.push({ text: `Conversación hasta ahora:\n\n${payload.transcript}` });
+    }
+    if (payload.image) {
+        parts.push({ inlineData: { mimeType: payload.image.mimeType, data: payload.image.data } });
+    }
+    parts.push({ text: payload.question });
+
+    // B5: streaming para no dejar la ventana en blanco 2-4 s.
+    const stream = await client.models.generateContentStream({
+        model,
+        config: { systemInstruction: payload.system },
+        contents: [{ role: 'user', parts }],
+    });
+
+    let fullText = '';
+    let isFirst = true;
+    let usage = null;
+    for await (const chunk of stream) {
+        const text = chunk.text || '';
+        if (text) {
+            fullText += text;
+            sendToRenderer(isFirst ? 'new-response' : 'update-response', fullText);
+            isFirst = false;
+        }
+        if (chunk.usageMetadata) usage = chunk.usageMetadata;
+    }
+
+    // B4: si esto es 0 de forma sostenida, la caché implícita no está funcionando;
+    // habría que mover el bloque estable al primer mensaje 'user' de contents.
+    if (usage) {
+        console.log('[Gemini] tokens cacheados:', usage.cachedContentTokenCount ?? 0, 'de', usage.promptTokenCount);
+    }
+
+    return fullText.trim();
+}
+
+const sessionManager = createSessionManager({
+    configDir: getConfigDir(),
+    // El adaptador de proveedor vive aquí: es lo único que sabe de Gemini.
+    // Aplica D13: un perfil confidencial nunca sale de la máquina, aunque el modo
+    // activo sea de nube. Prefiere una respuesta peor a una fuga.
+    sendToProvider: async payload => {
+        if (payload.confidential) {
+            if (!getLocalAi().isReasoningActive()) {
+                throw new Error('Este perfil es confidencial y requiere el razonamiento local activo');
+            }
+            return getLocalAi().sendLocalPayload(payload);
+        }
+        return sendPayloadToGemini(payload);
+    },
+});
+
+// D17: cierra el bucle entre reuniones. El resumen se añade al historial del perfil,
+// y la siguiente sesión con ese mismo perfil lo carga como una nota más.
+async function generateSessionDigest() {
+    const ctx = sessionManager.getContext();
+    const profile = sessionManager.getProfile();
+    if (!ctx || !profile) return;
+
+    const transcript = ctx.getTranscript();
+    if (transcript.length <= 200) {
+        sessionManager.end();
+        return;
+    }
+
+    try {
+        const { buildDigestPrompt, appendDigest } = require('../core/digest');
+        const { getProfilesDir } = require('../core/profiles');
+
+        const digestPayload = {
+            system: 'Eres un asistente que resume reuniones con precisión y sin inventar.',
+            transcript: '',
+            question: buildDigestPrompt(transcript),
+            image: null,
+            model: profile.meta.model,
+            confidential: profile.meta.confidential,
+        };
+
+        const digest = profile.meta.confidential ? await getLocalAi().sendLocalPayload(digestPayload) : await sendPayloadToGemini(digestPayload);
+
+        if (digest) {
+            appendDigest({
+                profilesDir: getProfilesDir(getConfigDir()),
+                profileName: profile.name,
+                digest,
+                date: new Date().toISOString().slice(0, 10),
+            });
+            sendToRenderer('save-session-digest', { sessionId: ctx.toJSON().sessionId, digest });
+        }
+    } catch (error) {
+        console.error('No se pudo generar el resumen de la sesión:', error);
+    } finally {
+        sessionManager.end();
+    }
+}
+
+function endSessionForEmergency() {
+    sessionManager.end();
+}
 
 function sendToRenderer(channel, data) {
     const windows = BrowserWindow.getAllWindows();
@@ -1050,6 +1164,44 @@ async function sendImageToGeminiHttp(base64Data, prompt) {
 }
 
 function setupGeminiIpcHandlers(geminiSessionRef) {
+    // La transcripción local alimenta el hilo; no invoca al modelo (D1).
+    getLocalAi().setTranscriptionHandler((speaker, text) => {
+        sessionManager.recordSpeech(speaker, text);
+        sendToRenderer('transcription', { speaker, text });
+    });
+
+    // Punto de entrada único de sesión: decide qué arrancar según los dos ejes (D14).
+    ipcMain.handle('initialize-session', async (event, { profileName }) => {
+        try {
+            const prefs = getPreferences();
+            const { profile } = sessionManager.start({ profileName });
+            const modes = resolveModes(prefs, profile.meta);
+            currentProviderMode = modes.reasoning === 'local-llama' ? 'local' : 'byok';
+
+            sendToRenderer('session-initializing', true);
+
+            if (modes.transcription === 'local-whisper') {
+                await getLocalAi().startTranscription({ whisperModel: prefs.whisperModel });
+            }
+            if (modes.reasoning === 'local-llama') {
+                await getLocalAi().startLocalReasoning({ model: prefs.localLlmModel, customPrompt: profile.instructions });
+            }
+            if (modes.transcription === 'gemini-live') {
+                await initializeGeminiSession(getApiKey(), profile.instructions, profileName, prefs.selectedLanguage);
+            }
+
+            sendToRenderer('session-initializing', false);
+            sendToRenderer('update-status', 'Listo - escuchando...');
+            console.log('[Sesión] iniciada:', profileName, modes);
+            return { success: true, modes };
+        } catch (error) {
+            console.error('Error iniciando sesión:', error);
+            sessionManager.end();
+            sendToRenderer('session-initializing', false);
+            return { success: false, error: error.message };
+        }
+    });
+
     // Store the geminiSessionRef globally for reconnection access
     global.geminiSessionRef = geminiSessionRef;
 
@@ -1171,107 +1323,35 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     ipcMain.handle('send-image-content', async (event, { data, prompt }) => {
         try {
             if (!data || typeof data !== 'string') {
-                console.error('Invalid image data received');
-                return { success: false, error: 'Invalid image data' };
+                return { success: false, error: 'Datos de imagen inválidos' };
             }
 
             const buffer = Buffer.from(data, 'base64');
-
             if (buffer.length < 1000) {
-                console.error(`Image buffer too small: ${buffer.length} bytes`);
-                return { success: false, error: 'Image buffer too small' };
+                return { success: false, error: 'Imagen demasiado pequeña' };
             }
 
-            process.stdout.write('!');
+            const answer = await sessionManager.ask({
+                question: prompt || 'Ayúdame con lo que estoy viendo y con la conversación hasta ahora.',
+                image: { data, mimeType: 'image/jpeg' },
+            });
 
-            if (currentProviderMode === 'cloud') {
-                const sent = sendCloudImage(data);
-                if (!sent) {
-                    return { success: false, error: 'Cloud connection not active' };
-                }
-                return { success: true, model: 'cloud' };
-            }
-
-            if (currentProviderMode === 'local') {
-                const result = await getLocalAi().sendLocalImage(data, prompt);
-                return result;
-            }
-
-            const result = hasGroqKey() ? await sendImageToGroq(data, prompt) : await sendImageToGeminiHttp(data, prompt);
-            return result;
+            return { success: true, text: answer };
         } catch (error) {
-            console.error('Error sending image:', error);
+            console.error('Error enviando imagen:', error);
             return { success: false, error: error.message };
         }
     });
 
     ipcMain.handle('send-text-message', async (event, text) => {
         if (!text || typeof text !== 'string' || text.trim().length === 0) {
-            return { success: false, error: 'Invalid text message' };
+            return { success: false, error: 'Mensaje vacío' };
         }
-
-        if (currentProviderMode === 'cloud') {
-            try {
-                console.log('Sending text to cloud:', text);
-                sendCloudText(text.trim());
-                return { success: true };
-            } catch (error) {
-                console.error('Error sending cloud text:', error);
-                return { success: false, error: error.message };
-            }
-        }
-
-        if (currentProviderMode === 'local') {
-            try {
-                console.log('Sending text to local Llama:', text);
-                return await getLocalAi().sendLocalText(text.trim());
-            } catch (error) {
-                console.error('Error sending local text:', error);
-                return { success: false, error: error.message };
-            }
-        }
-
-        if (!geminiSessionRef.current) return { success: false, error: 'No active Gemini session' };
-
         try {
-            console.log('Sending text message:', text);
-
-            if (hasGroqKey()) {
-                groqRequestStartedForTurn = true;
-                sendToGroq(text.trim());
-            }
-
-            await geminiSessionRef.current.sendRealtimeInput({ text: text.trim() });
-            return { success: true };
+            const answer = await sessionManager.ask({ question: text.trim() });
+            return { success: true, text: answer };
         } catch (error) {
-            console.error('Error sending text:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('start-macos-audio', async event => {
-        if (process.platform !== 'darwin') {
-            return {
-                success: false,
-                error: 'macOS audio capture only available on macOS',
-            };
-        }
-
-        try {
-            const success = await startMacOSAudioCapture(geminiSessionRef);
-            return { success };
-        } catch (error) {
-            console.error('Error starting macOS audio capture:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('stop-macos-audio', async event => {
-        try {
-            stopMacOSAudioCapture();
-            return { success: true };
-        } catch (error) {
-            console.error('Error stopping macOS audio capture:', error);
+            console.error('Error en pregunta por texto:', error);
             return { success: false, error: error.message };
         }
     });
@@ -1279,6 +1359,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     ipcMain.handle('close-session', async event => {
         try {
             stopMacOSAudioCapture();
+            await generateSessionDigest();
 
             if (currentProviderMode === 'cloud') {
                 closeCloud();
@@ -1347,6 +1428,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 }
 
 module.exports = {
+    endSessionForEmergency,
+    sendPayloadToGemini,
     initializeGeminiSession,
     getEnabledTools,
     getStoredSetting,
