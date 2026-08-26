@@ -736,7 +736,7 @@ export class MainView extends LitElement {
         this._showLocalHelp = false;
         this._localLlmModel = 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
         this._useCustomLocalLlmModel = false;
-        this._whisperModel = 'tiny.en';
+        this._whisperModel = 'large-v3-turbo';
 
         this._animId = null;
         this._time = 0;
@@ -775,7 +775,7 @@ export class MainView extends LitElement {
             // Load local AI settings
             this._localLlmModel = prefs.localLlmModel || 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
             this._useCustomLocalLlmModel = !LOCAL_LLM_PRESETS.some(preset => preset.value === this._localLlmModel);
-            this._whisperModel = prefs.whisperModel || 'tiny.en';
+            this._whisperModel = prefs.whisperModel || 'large-v3-turbo';
 
             this.requestUpdate();
         } catch (e) {
@@ -1297,9 +1297,13 @@ export class MainView extends LitElement {
                             ${this.whisperDownloading ? html`<div class="whisper-spinner"></div>` : ''}
                         </div>
                         <select .value=${this._whisperModel} @change=${e => this._saveWhisperModel(e.target.value)}>
-                            <option value="tiny.en" ?selected=${this._whisperModel === 'tiny.en'}>Tiny English (75 MB, fastest)</option>
+                            <option value="large-v3-turbo" ?selected=${this._whisperModel === 'large-v3-turbo'}>
+                                Large v3 Turbo (1.6 GB, multilingüe, recomendado)
+                            </option>
+                            <option value="medium.en" ?selected=${this._whisperModel === 'medium.en'}>Medium English (1.5 GB)</option>
+                            <option value="small.en" ?selected=${this._whisperModel === 'small.en'}>Small English (466 MB)</option>
                             <option value="base.en" ?selected=${this._whisperModel === 'base.en'}>Base English (142 MB)</option>
-                            <option value="small.en" ?selected=${this._whisperModel === 'small.en'}>Small English (466 MB, most accurate)</option>
+                            <option value="tiny.en" ?selected=${this._whisperModel === 'tiny.en'}>Tiny English (75 MB, el más rápido)</option>
                         </select>
                         <div class="form-hint">${this.whisperDownloading ? 'Downloading model...' : 'Downloaded automatically on first use'}</div>
                     </div>

@@ -62,6 +62,18 @@ const WHISPER_MODELS = {
         url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin',
         sha256: 'c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d',
     },
+    'medium.en': {
+        filename: 'ggml-medium.en.bin',
+        url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin',
+        sha256: 'cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356',
+    },
+    // Multilingüe y con decoder destilado: mejor que small.en en inglés y además
+    // autodetecta idioma, a diferencia de las variantes .en (ver D4).
+    'large-v3-turbo': {
+        filename: 'ggml-large-v3-turbo.bin',
+        url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',
+        sha256: '1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69',
+    },
 };
 
 function getPlatformReleases() {
@@ -177,7 +189,7 @@ function normalizeWhisperModel(modelName) {
         'Xenova/whisper-small': 'small.en',
     };
 
-    return legacyModels[modelName] || modelName || 'tiny.en';
+    return legacyModels[modelName] || modelName || 'large-v3-turbo';
 }
 
 async function ensureWhisperModel(modelName, onProgress, signal) {
@@ -372,6 +384,7 @@ function stopNativeServer(childProcess) {
 }
 
 module.exports = {
+    normalizeWhisperModel,
     ensureNativeBinary,
     ensureLlamaModel,
     ensureWhisperModel,

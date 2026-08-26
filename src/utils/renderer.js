@@ -156,7 +156,7 @@ async function initializeGemini(profile = 'interview', language = 'en-US') {
 async function initializeLocal(profile = 'interview') {
     const prefs = await storage.getPreferences();
     const localLlmModel = prefs.localLlmModel || 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
-    const whisperModel = prefs.whisperModel || 'tiny.en';
+    const whisperModel = prefs.whisperModel || 'large-v3-turbo';
     const customPrompt = prefs.customPrompt || '';
 
     const success = await ipcRenderer.invoke('initialize-local', localLlmModel, whisperModel, profile, customPrompt);
