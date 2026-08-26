@@ -83,7 +83,7 @@ Cada fase deja la app funcionando.
 **Interfaces:**
 
 - Consumes: nada
-- Produces: `npm test` ejecuta `node --test test/`. Helper `makePcm16({ samples, amplitude })` → `Buffer` PCM16 mono little-endian, usado por todas las tareas siguientes.
+- Produces: `npm test` ejecuta `node --test "test/**/*.test.js"`. Helper `makePcm16({ samples, amplitude })` → `Buffer` PCM16 mono little-endian, usado por todas las tareas siguientes.
 
 - [ ] **Step 1: Escribir el test de humo**
 
@@ -104,7 +104,7 @@ En `package.json`, reemplazar la línea del script `lint` por estas dos:
 
 ```json
         "lint": "echo \"No linting configured\"",
-        "test": "node --test test/"
+        "test": "node --test \\"test/**/*.test.js\\""
 ```
 
 - [ ] **Step 3: Ejecutar y verificar que pasa**
