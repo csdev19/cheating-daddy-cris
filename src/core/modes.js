@@ -1,9 +1,9 @@
 const TRANSCRIPTION = ['local-whisper', 'gemini-live'];
 const REASONING = ['gemini', 'local-llama'];
 
-// Dos ejes independientes (D14). Antes eran uno solo (`providerMode`), lo que hacía
-// imposible la combinación por defecto del diseño: transcribir en local y razonar
-// en la nube. El providerMode antiguo se traduce para no romper preferencias guardadas.
+// Two independent axes (D14). They used to be a single one (`providerMode`), which
+// made the design's default combination impossible: transcribe locally and reason in
+// the cloud. The old providerMode is translated so stored preferences keep working.
 function resolveModes(prefs = {}, profileMeta = {}) {
     let transcription = TRANSCRIPTION.includes(prefs.transcription) ? prefs.transcription : null;
     let reasoning = REASONING.includes(prefs.reasoning) ? prefs.reasoning : null;
@@ -21,8 +21,8 @@ function resolveModes(prefs = {}, profileMeta = {}) {
     transcription = transcription || 'local-whisper';
     reasoning = reasoning || 'gemini';
 
-    // Un perfil confidencial nunca sale de la máquina, aunque las preferencias
-    // digan lo contrario (D13).
+    // A confidential profile never leaves the machine, whatever the preferences
+    // happen to say (D13).
     if (profileMeta.confidential === true) {
         transcription = 'local-whisper';
         reasoning = 'local-llama';

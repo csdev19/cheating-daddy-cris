@@ -2,159 +2,159 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { projectThread, formatClock } = require('../src/core/thread-view');
 
-// Reloj legible: t(14, 2) es hoy a las 14:02 hora local, así el test no depende de TZ.
-function t(hora, minuto, segundo = 0) {
-    const d = new Date(2026, 0, 15, hora, minuto, segundo);
-    return d.getTime();
+// Readable clock: t(14, 2) is today at 14:02 local time, so the test does not
+// depend on the machine's timezone.
+function t(hour, minute, second = 0) {
+    return new Date(2026, 0, 15, hour, minute, second).getTime();
 }
 
-test('un hilo vacío no produce filas', () => {
+test('an empty thread produces no rows', () => {
     assert.deepStrictEqual(projectThread([]), []);
     assert.deepStrictEqual(projectThread(undefined), []);
 });
 
-test('cada turno de voz es una fila etiquetada con su hablante', () => {
-    const filas = projectThread([
-        { t: t(14, 2), kind: 'speech', speaker: 'them', text: '¿Cómo manejarías un deadlock?' },
-        { t: t(14, 3), kind: 'speech', speaker: 'me', text: 'Miraría los logs del pool.' },
+test('each speech turn is a row labelled with its speaker', () => {
+    const rows = projectThread([
+        { t: t(14, 2), kind: 'speech', speaker: 'them', text: 'How would you handle a deadlock?' },
+        { t: t(14, 3), kind: 'speech', speaker: 'me', text: 'I would look at the pool logs.' },
     ]);
 
-    assert.strictEqual(filas.length, 2);
-    assert.strictEqual(filas[0].kind, 'speech');
-    assert.strictEqual(filas[0].speaker, 'them');
-    assert.strictEqual(filas[0].text, '¿Cómo manejarías un deadlock?');
-    assert.strictEqual(filas[1].speaker, 'me');
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].kind, 'speech');
+    assert.strictEqual(rows[0].speaker, 'them');
+    assert.strictEqual(rows[0].text, 'How would you handle a deadlock?');
+    assert.strictEqual(rows[1].speaker, 'me');
 });
 
-// Whisper emite un segmento por pausa del VAD, así que una sola frase hablada
-// llega troceada. Sin fusionar, la vista es una lista de fragmentos ilegibles.
-test('fusiona segmentos seguidos del mismo hablante dentro de la ventana', () => {
-    const filas = projectThread([
-        { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: 'Vale,' },
-        { t: t(14, 2, 3), kind: 'speech', speaker: 'them', text: 'entonces el lock' },
-        { t: t(14, 2, 6), kind: 'speech', speaker: 'them', text: 'está en otro servicio.' },
+// Whisper emits one segment per VAD pause, so a single spoken sentence arrives in
+// pieces. Without merging, the view is an unreadable list of fragments.
+test('merges consecutive segments from the same speaker inside the window', () => {
+    const rows = projectThread([
+        { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: 'Right,' },
+        { t: t(14, 2, 3), kind: 'speech', speaker: 'them', text: 'so the lock' },
+        { t: t(14, 2, 6), kind: 'speech', speaker: 'them', text: 'lives in another service.' },
     ]);
 
-    assert.strictEqual(filas.length, 1);
-    assert.strictEqual(filas[0].text, 'Vale, entonces el lock está en otro servicio.');
-    assert.strictEqual(filas[0].t, t(14, 2, 0), 'la fila conserva el inicio del primer segmento');
-    assert.strictEqual(filas[0].tEnd, t(14, 2, 6));
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].text, 'Right, so the lock lives in another service.');
+    assert.strictEqual(rows[0].t, t(14, 2, 0), 'the row keeps the start of the first segment');
+    assert.strictEqual(rows[0].tEnd, t(14, 2, 6));
 });
 
-test('no fusiona si cambia el hablante', () => {
-    const filas = projectThread([
-        { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: '¿Y el timeout?' },
-        { t: t(14, 2, 2), kind: 'speech', speaker: 'me', text: 'Treinta segundos.' },
+test('does not merge when the speaker changes', () => {
+    const rows = projectThread([
+        { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: 'And the timeout?' },
+        { t: t(14, 2, 2), kind: 'speech', speaker: 'me', text: 'Thirty seconds.' },
     ]);
 
-    assert.strictEqual(filas.length, 2);
+    assert.strictEqual(rows.length, 2);
 });
 
-test('no fusiona si pasa demasiado tiempo entre segmentos', () => {
-    const filas = projectThread(
+test('does not merge when too much time passes between segments', () => {
+    const rows = projectThread(
         [
-            { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: 'Primera idea.' },
-            { t: t(14, 5, 0), kind: 'speech', speaker: 'them', text: 'Segunda idea.' },
+            { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: 'First idea.' },
+            { t: t(14, 5, 0), kind: 'speech', speaker: 'them', text: 'Second idea.' },
         ],
         { mergeWindowMs: 8000 }
     );
 
-    assert.strictEqual(filas.length, 2);
+    assert.strictEqual(rows.length, 2);
 });
 
-test('una pregunta al asistente es una fila con pregunta y respuesta', () => {
-    const filas = projectThread([{ t: t(14, 4), kind: 'ask', question: '¿Qué me falta?', answer: 'Menciona lock ordering.' }]);
+test('a question to the assistant is one row with question and answer', () => {
+    const rows = projectThread([{ t: t(14, 4), kind: 'ask', question: 'What am I missing?', answer: 'Mention lock ordering.' }]);
 
-    assert.strictEqual(filas.length, 1);
-    assert.strictEqual(filas[0].kind, 'ask');
-    assert.strictEqual(filas[0].question, '¿Qué me falta?');
-    assert.strictEqual(filas[0].answer, 'Menciona lock ordering.');
-    assert.strictEqual(filas[0].imageRef, null);
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].kind, 'ask');
+    assert.strictEqual(rows[0].question, 'What am I missing?');
+    assert.strictEqual(rows[0].answer, 'Mention lock ordering.');
+    assert.strictEqual(rows[0].imageRef, null);
 });
 
-// La captura y la pregunta que la usa son un solo gesto del usuario; pintarlas
-// como dos filas separadas rompe la lectura.
-test('la captura que precede a una pregunta se adjunta a esa pregunta', () => {
-    const filas = projectThread([
-        { t: t(14, 4, 0), kind: 'screen', imageRef: 'sesion/screen-1.jpg', caption: null },
-        { t: t(14, 4, 1), kind: 'ask', question: 'Ayúdame con esto', answer: 'Es un deadlock.' },
+// The screenshot and the question that uses it are one single user gesture;
+// painting them as two separate rows breaks the reading.
+test('a screenshot right before a question attaches to that question', () => {
+    const rows = projectThread([
+        { t: t(14, 4, 0), kind: 'screen', imageRef: 'session/screen-1.jpg', caption: null },
+        { t: t(14, 4, 1), kind: 'ask', question: 'Help me with this', answer: 'It is a deadlock.' },
     ]);
 
-    assert.strictEqual(filas.length, 1);
-    assert.strictEqual(filas[0].kind, 'ask');
-    assert.strictEqual(filas[0].imageRef, 'sesion/screen-1.jpg');
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].kind, 'ask');
+    assert.strictEqual(rows[0].imageRef, 'session/screen-1.jpg');
 });
 
-test('una captura sin pregunta detrás se queda como fila propia', () => {
-    const filas = projectThread([
-        { t: t(14, 4, 0), kind: 'screen', imageRef: 'sesion/screen-1.jpg', caption: 'LeetCode' },
-        { t: t(14, 9, 0), kind: 'ask', question: 'Otra cosa', answer: 'Vale.' },
+test('a screenshot with no question behind it stays a row of its own', () => {
+    const rows = projectThread([
+        { t: t(14, 4, 0), kind: 'screen', imageRef: 'session/screen-1.jpg', caption: 'LeetCode' },
+        { t: t(14, 9, 0), kind: 'ask', question: 'Something else', answer: 'Sure.' },
     ]);
 
-    assert.strictEqual(filas.length, 2);
-    assert.strictEqual(filas[0].kind, 'screen');
-    assert.strictEqual(filas[0].imageRef, 'sesion/screen-1.jpg');
-    assert.strictEqual(filas[0].caption, 'LeetCode');
-    assert.strictEqual(filas[1].imageRef, null);
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].kind, 'screen');
+    assert.strictEqual(rows[0].imageRef, 'session/screen-1.jpg');
+    assert.strictEqual(rows[0].caption, 'LeetCode');
+    assert.strictEqual(rows[1].imageRef, null);
 });
 
-test('una captura no se adjunta a dos preguntas', () => {
-    const filas = projectThread([
-        { t: t(14, 4, 0), kind: 'screen', imageRef: 'sesion/screen-1.jpg' },
-        { t: t(14, 4, 1), kind: 'ask', question: 'Primera', answer: 'Una.' },
-        { t: t(14, 4, 2), kind: 'ask', question: 'Segunda', answer: 'Dos.' },
+test('a screenshot does not attach to two questions', () => {
+    const rows = projectThread([
+        { t: t(14, 4, 0), kind: 'screen', imageRef: 'session/screen-1.jpg' },
+        { t: t(14, 4, 1), kind: 'ask', question: 'First', answer: 'One.' },
+        { t: t(14, 4, 2), kind: 'ask', question: 'Second', answer: 'Two.' },
     ]);
 
-    assert.strictEqual(filas.length, 2);
-    assert.strictEqual(filas[0].imageRef, 'sesion/screen-1.jpg');
-    assert.strictEqual(filas[1].imageRef, null);
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].imageRef, 'session/screen-1.jpg');
+    assert.strictEqual(rows[1].imageRef, null);
 });
 
-test('los eventos de checklist son su propia fila', () => {
-    const filas = projectThread([{ t: t(14, 6), kind: 'checklist', itemId: 'salario', status: 'hecho' }]);
+test('checklist events are rows of their own', () => {
+    const rows = projectThread([{ t: t(14, 6), kind: 'checklist', itemId: 'salary', status: 'done' }]);
 
-    assert.strictEqual(filas[0].kind, 'checklist');
-    assert.strictEqual(filas[0].itemId, 'salario');
-    assert.strictEqual(filas[0].status, 'hecho');
+    assert.strictEqual(rows[0].kind, 'checklist');
+    assert.strictEqual(rows[0].itemId, 'salary');
+    assert.strictEqual(rows[0].status, 'done');
 });
 
-test('mantiene el orden cronológico entre tipos distintos', () => {
-    const filas = projectThread([
-        { t: t(14, 2), kind: 'speech', speaker: 'them', text: 'Uno' },
-        { t: t(14, 3), kind: 'ask', question: 'Dos', answer: 'Dos.' },
-        { t: t(14, 4), kind: 'speech', speaker: 'me', text: 'Tres' },
+test('keeps chronological order across different kinds', () => {
+    const rows = projectThread([
+        { t: t(14, 2), kind: 'speech', speaker: 'them', text: 'One' },
+        { t: t(14, 3), kind: 'ask', question: 'Two', answer: 'Two.' },
+        { t: t(14, 4), kind: 'speech', speaker: 'me', text: 'Three' },
     ]);
 
     assert.deepStrictEqual(
-        filas.map(f => f.kind),
+        rows.map(r => r.kind),
         ['speech', 'ask', 'speech']
     );
 });
 
-test('cada fila lleva un id estable para que Lit no repinte de más', () => {
-    const eventos = [
-        { t: t(14, 2), kind: 'speech', speaker: 'them', text: 'Uno' },
-        { t: t(14, 3), kind: 'speech', speaker: 'me', text: 'Dos' },
+test('every row carries a stable id so Lit does not repaint needlessly', () => {
+    const events = [
+        { t: t(14, 2), kind: 'speech', speaker: 'them', text: 'One' },
+        { t: t(14, 3), kind: 'speech', speaker: 'me', text: 'Two' },
     ];
 
-    const primeros = projectThread(eventos).map(f => f.id);
-    const segundos = projectThread(eventos).map(f => f.id);
+    const first = projectThread(events).map(r => r.id);
+    const second = projectThread(events).map(r => r.id);
 
-    assert.deepStrictEqual(primeros, segundos);
-    assert.strictEqual(new Set(primeros).size, 2, 'los ids no se repiten entre filas');
+    assert.deepStrictEqual(first, second);
+    assert.strictEqual(new Set(first).size, 2, 'ids do not repeat across rows');
 });
 
-test('ignora turnos de voz vacíos', () => {
-    const filas = projectThread([
+test('ignores empty speech turns', () => {
+    const rows = projectThread([
         { t: t(14, 2), kind: 'speech', speaker: 'them', text: '   ' },
         { t: t(14, 3), kind: 'speech', speaker: 'me', text: 'Real.' },
     ]);
 
-    assert.strictEqual(filas.length, 1);
-    assert.strictEqual(filas[0].text, 'Real.');
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].text, 'Real.');
 });
 
-test('formatClock da la hora local en HH:MM con cero a la izquierda', () => {
+test('formatClock gives the local time as zero-padded HH:MM', () => {
     assert.strictEqual(formatClock(t(9, 5)), '09:05');
     assert.strictEqual(formatClock(t(14, 2)), '14:02');
     assert.strictEqual(formatClock(t(0, 0)), '00:00');

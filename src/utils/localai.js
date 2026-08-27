@@ -27,8 +27,8 @@ let llamaCacheSnapshot = new Set();
 
 const { createVad, VAD_MODES } = require('../core/vad');
 
-// Serializa las peticiones a whisper-server (atiende una a la vez) y descarta lo
-// más viejo si se acumula, para que el retraso no crezca sin límite (B2).
+// Serialises requests to whisper-server (it handles one at a time) and drops the
+// oldest if a backlog builds up, so the lag cannot grow without bound (B2).
 const MAX_PENDING_PER_CHANNEL = 3;
 const channelQueue = (() => {
     const pending = { them: [], me: [] };
@@ -38,7 +38,7 @@ const channelQueue = (() => {
         if (busy) return;
         busy = true;
         try {
-            // Alterna canales para que ninguno monopolice el servidor.
+            // Alternate channels so neither one monopolises the server.
             while (pending.them.length || pending.me.length) {
                 for (const speaker of ['them', 'me']) {
                     const audio = pending[speaker].shift();
@@ -67,13 +67,13 @@ const channelQueue = (() => {
     return { push, clear };
 })();
 
-// Un canal = un VAD + su propio resto de resampleo. Compartirlos entre canales
-// corrompe el audio y mezcla los hablantes (ver Tarea 7 del plan).
-// Un canal = un VAD propio. El resampleo se hace ahora en el renderer con
-// OfflineAudioContext, que filtra correctamente (H7); aquí llega PCM16 a 16 kHz.
+// One channel = one VAD of its own. Sharing state across channels corrupts the audio
+// and mixes the speakers up (task 7 of the plan). Resampling now happens in the
+// renderer with OfflineAudioContext, which filters properly (H7); PCM16 at 16 kHz
+// arrives here.
 function createChannel(speaker) {
     const vad = createVad({
-        // D20: 2 s de silencio en vez de 3, para bajar la latencia total.
+        // D20: 2s of silence instead of 3, to bring the total latency down.
         mode: { ...VAD_MODES.NORMAL, silenceFramesRequired: 20 },
         preRollFrames: 3,
         onSpeechEnd: audioData => channelQueue.push(speaker, audioData),
@@ -115,8 +115,8 @@ async function transcribeAudio(pcm16kBuffer) {
     formData.append('file', new Blob([wavBuffer], { type: 'audio/wav' }), 'speech.wav');
     formData.append('response_format', 'verbose_json');
     formData.append('temperature', '0.0');
-    // Los modelos .en solo saben inglés; los multilingües deben autodetectar.
-    // Enviar language='en' a un modelo multilingüe fuerza mal el decodificado (D4).
+    // The .en models only know English; multilingual ones must autodetect. Sending
+    // language='en' to a multilingual model forces the decode down the wrong path (D4).
     formData.append('language', normalizeWhisperModel(currentWhisperModel).endsWith('.en') ? 'en' : 'auto');
 
     const response = await fetch(`${whisperBaseUrl}/inference`, {
@@ -131,8 +131,8 @@ async function transcribeAudio(pcm16kBuffer) {
     const result = await response.json();
     const segments = Array.isArray(result.segments) ? result.segments : null;
 
-    // Whisper inventa frases en silencio y ruido; no_speech_prob y una lista corta
-    // de muletillas conocidas eliminan la mayoría (B3).
+    // Whisper invents phrases over silence and noise; no_speech_prob plus a short
+    // list of known filler removes most of them (B3).
     const text = segments
         ? segments
               .filter(seg => (seg.no_speech_prob ?? 0) < 0.6)
@@ -146,7 +146,7 @@ async function transcribeAudio(pcm16kBuffer) {
     return text;
 }
 
-// El consumidor (gestor de sesión) inyecta a dónde va la transcripción.
+// The consumer (the session manager) injects where the transcription goes.
 let onTranscription = () => {};
 function setTranscriptionHandler(handler) {
     onTranscription = typeof handler === 'function' ? handler : () => {};
@@ -165,7 +165,7 @@ async function handleSpeechEnd(audioData, speaker = 'them') {
 
         if (!transcription || transcription.trim().length < 2) return;
 
-        // Solo acumulamos contexto. El modelo se invoca con el atajo, no aquí (D1).
+        // Context only. The model is called from the shortcut, never here (D1).
         onTranscription(speaker, transcription.trim());
     } catch (error) {
         console.error('[LocalAI] Transcription error:', error);
@@ -412,9 +412,9 @@ async function startLlamaServer(executablePath, modelPath, projectorPath) {
     await waitForServer(`${llamaBaseUrl}/health`, llamaProcess, 30 * 60 * 1000);
 }
 
-// D14: transcripción y razonamiento son ejes independientes. Antes ambos vivían
-// dentro de initializeLocalSession, así que usar Whisper obligaba a descargar y
-// cargar el LLM local aunque se fuera a razonar en la nube (hallazgo A1).
+// D14: transcription and reasoning are independent axes. Both used to live inside
+// initializeLocalSession, so using Whisper forced downloading and loading the local
+// LLM even when the reasoning was going to happen in the cloud (finding A1).
 async function startTranscription({ whisperModel }) {
     initializationController = initializationController || new AbortController();
     const signal = initializationController.signal;
@@ -643,7 +643,7 @@ async function sendLocalImage(base64Data, prompt) {
     }
 }
 
-// Equivalente local del adaptador de proveedor: mismo payload neutro, servidor llama.cpp.
+// Local counterpart of the provider adapter: same neutral payload, llama.cpp server.
 async function sendLocalPayload(payload) {
     if (!llamaProcess) {
         throw new Error('Local reasoning is not running');

@@ -3,15 +3,15 @@ const SPEAKERS = ['them', 'me'];
 // 'them' channel can hold more than one person (finding C1).
 const SPEAKER_LABELS = { them: 'Them', me: 'Me' };
 
-// El hilo único de la sesión. Sustituye a conversationHistory + screenAnalysisHistory,
-// que vivían separados y nunca llegaban juntos al modelo (ver hallazgo H3).
+// The session's single thread. Replaces conversationHistory + screenAnalysisHistory,
+// which lived apart and never reached the model together (finding H3).
 function createSessionContext({ sessionId, profileName = null, now = Date.now, events = [] } = {}) {
     if (!sessionId) throw new TypeError('createSessionContext requires sessionId');
 
     const thread = events.slice();
 
-    // Devuelve el evento para que quien lo registra pueda propagarlo (ver `onEvent`
-    // en session.js): la vista necesita el evento exacto que entró al hilo.
+    // Returns the event so whoever records it can forward it on (see `onEvent` in
+    // session.js): the view needs the exact event that entered the thread.
     function push(event) {
         thread.push(event);
         thread.sort((a, b) => a.t - b.t);

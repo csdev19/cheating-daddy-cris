@@ -5,8 +5,8 @@ function getProfilesDir(configDir) {
     return path.join(configDir, 'profiles');
 }
 
-// Parser mínimo de frontmatter: solo pares `clave: valor` en la cabecera.
-// Suficiente para name/confidential/model, y evita añadir una dependencia de YAML.
+// Minimal frontmatter parser: only `key: value` pairs in the header. Enough for
+// name/confidential/model, and it avoids taking on a YAML dependency.
 function parseFrontmatter(raw) {
     const text = (raw || '').replace(/^﻿/, '');
     if (!text.startsWith('---')) {
@@ -30,7 +30,7 @@ function parseFrontmatter(raw) {
         if (sep === -1) continue;
 
         const clave = limpia.slice(0, sep).trim();
-        // Quitamos comentario al final de línea y comillas envolventes.
+        // Strip a trailing comment and any wrapping quotes.
         let valor = limpia
             .slice(sep + 1)
             .replace(/\s+#.*$/, '')
@@ -45,8 +45,8 @@ function parseFrontmatter(raw) {
     return { meta, body };
 }
 
-// Un perfil es una carpeta con profile.md. Cualquier otra cosa no se ofrece:
-// si el selector la lista, elegirla revienta la sesión al arrancar.
+// A profile is a folder with a profile.md. Anything else is not offered: if the
+// picker lists it, choosing it breaks the session on start.
 function listProfiles(profilesDir) {
     if (!fs.existsSync(profilesDir)) return [];
     return fs
@@ -57,8 +57,8 @@ function listProfiles(profilesDir) {
         .sort();
 }
 
-// Lo que necesita el selector: la carpeta (el id real) y el nombre que se enseña.
-// Al salir de disco, la lista no puede quedar desincronizada de lo que existe.
+// What the picker needs: the folder (the real id) and the name to display. Coming
+// from disk, the list cannot drift out of sync with what actually exists.
 function describeProfiles(profilesDir) {
     return listProfiles(profilesDir).map(dir => {
         const { meta } = parseFrontmatter(fs.readFileSync(path.join(profilesDir, dir, 'profile.md'), 'utf8'));
@@ -66,8 +66,8 @@ function describeProfiles(profilesDir) {
     });
 }
 
-// El perfil guardado en preferencias puede haberse renombrado o borrado a mano.
-// Sin este respaldo la app se queda sin arrancar y sin forma de recuperarse.
+// The profile stored in preferences may have been renamed or deleted by hand.
+// Without this fallback the app cannot start and has no way to recover.
 function resolveProfileName(profilesDir, preferred) {
     const available = listProfiles(profilesDir);
     if (available.length === 0) return null;
@@ -101,7 +101,7 @@ function readContextFiles(profileDir) {
     const dir = path.join(profileDir, 'context');
     if (!fs.existsSync(dir)) return [];
 
-    // Orden alfabético estable: el prefijo cacheado no debe cambiar entre invocaciones.
+    // Stable alphabetical order: the cached prefix must not change between calls.
     return fs
         .readdirSync(dir)
         .filter(f => f.endsWith('.md'))

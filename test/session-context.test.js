@@ -2,34 +2,34 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { createSessionContext, fromJSON } = require('../src/core/session-context');
 
-function nuevoContexto() {
-    let reloj = 1000;
-    return createSessionContext({ sessionId: 's1', profileName: 'entrevista', now: () => reloj++ });
+function newContext() {
+    let clock = 1000;
+    return createSessionContext({ sessionId: 's1', profileName: 'interview', now: () => clock++ });
 }
 
-test('empieza vacío', () => {
-    const ctx = nuevoContexto();
+test('starts empty', () => {
+    const ctx = newContext();
     assert.deepStrictEqual(ctx.getEvents(), []);
     assert.strictEqual(ctx.getTranscript(), '');
 });
 
-test('acumula voz de ambos hablantes en un solo hilo', () => {
-    const ctx = nuevoContexto();
-    ctx.addSpeech({ speaker: 'them', text: '¿Cuál es tu experiencia con Node?' });
-    ctx.addSpeech({ speaker: 'me', text: 'Cinco años.' });
+test('collects speech from both speakers into a single thread', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'them', text: 'What is your experience with Node?' });
+    ctx.addSpeech({ speaker: 'me', text: 'Five years.' });
 
-    const eventos = ctx.getEvents();
-    assert.strictEqual(eventos.length, 2);
-    assert.strictEqual(eventos[0].kind, 'speech');
-    assert.strictEqual(eventos[0].speaker, 'them');
-    assert.strictEqual(eventos[1].speaker, 'me');
+    const events = ctx.getEvents();
+    assert.strictEqual(events.length, 2);
+    assert.strictEqual(events[0].kind, 'speech');
+    assert.strictEqual(events[0].speaker, 'them');
+    assert.strictEqual(events[1].speaker, 'me');
 });
 
-test('pantalla y voz conviven en el mismo hilo, ordenados por tiempo', () => {
-    const ctx = nuevoContexto();
-    ctx.addSpeech({ speaker: 'them', text: 'Mira este código.' });
+test('screen and speech share the thread, ordered by time', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'them', text: 'Look at this code.' });
     ctx.addScreen({ imageRef: 'img-1' });
-    ctx.addSpeech({ speaker: 'me', text: 'Ya lo veo.' });
+    ctx.addSpeech({ speaker: 'me', text: 'I see it.' });
 
     assert.deepStrictEqual(
         ctx.getEvents().map(e => e.kind),
@@ -37,68 +37,68 @@ test('pantalla y voz conviven en el mismo hilo, ordenados por tiempo', () => {
     );
 });
 
-test('ordena por marca de tiempo aunque lleguen desordenados', () => {
-    const ctx = nuevoContexto();
-    ctx.addSpeech({ speaker: 'me', text: 'segundo', t: 200 });
-    ctx.addSpeech({ speaker: 'them', text: 'primero', t: 100 });
+test('sorts by timestamp even when events arrive out of order', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'me', text: 'second', t: 200 });
+    ctx.addSpeech({ speaker: 'them', text: 'first', t: 100 });
 
     assert.deepStrictEqual(
         ctx.getEvents().map(e => e.text),
-        ['primero', 'segundo']
+        ['first', 'second']
     );
 });
 
-test('el transcript etiqueta a cada hablante', () => {
-    const ctx = nuevoContexto();
-    ctx.addSpeech({ speaker: 'them', text: 'Hola' });
-    ctx.addSpeech({ speaker: 'me', text: 'Buenas' });
+test('the transcript labels each speaker', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'them', text: 'Hello' });
+    ctx.addSpeech({ speaker: 'me', text: 'Hi there' });
 
-    assert.strictEqual(ctx.getTranscript(), '[Them]: Hola\n[Me]: Buenas');
+    assert.strictEqual(ctx.getTranscript(), '[Them]: Hello\n[Me]: Hi there');
 });
 
-test('el transcript ignora eventos que no son voz', () => {
-    const ctx = nuevoContexto();
-    ctx.addSpeech({ speaker: 'them', text: 'Hola' });
+test('the transcript ignores everything that is not speech', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'them', text: 'Hello' });
     ctx.addScreen({ imageRef: 'img-1' });
-    ctx.addAsk({ question: '¿qué digo?', answer: 'esto' });
+    ctx.addAsk({ question: 'what do I say?', answer: 'this' });
 
-    assert.strictEqual(ctx.getTranscript(), '[Them]: Hola');
+    assert.strictEqual(ctx.getTranscript(), '[Them]: Hello');
 });
 
-test('rechaza hablantes desconocidos', () => {
-    const ctx = nuevoContexto();
-    assert.throws(() => ctx.addSpeech({ speaker: 'otro', text: 'x' }), /speaker/);
+test('rejects unknown speakers', () => {
+    const ctx = newContext();
+    assert.throws(() => ctx.addSpeech({ speaker: 'other', text: 'x' }), /speaker/);
 });
 
-test('descarta texto vacío o solo espacios', () => {
-    const ctx = nuevoContexto();
+test('drops empty or whitespace-only text', () => {
+    const ctx = newContext();
     ctx.addSpeech({ speaker: 'them', text: '   ' });
     ctx.addSpeech({ speaker: 'them', text: '' });
     assert.strictEqual(ctx.getEvents().length, 0);
 });
 
-test('el checklist conserva el último estado de cada ítem', () => {
-    const ctx = nuevoContexto();
-    ctx.addChecklist({ itemId: 'preguntar-salario', status: 'pending' });
-    ctx.addChecklist({ itemId: 'mencionar-k8s', status: 'done' });
-    ctx.addChecklist({ itemId: 'preguntar-salario', status: 'done' });
+test('the checklist keeps the latest state of each item', () => {
+    const ctx = newContext();
+    ctx.addChecklist({ itemId: 'ask-salary', status: 'pending' });
+    ctx.addChecklist({ itemId: 'mention-k8s', status: 'done' });
+    ctx.addChecklist({ itemId: 'ask-salary', status: 'done' });
 
-    const estado = ctx.getChecklistState();
-    assert.strictEqual(estado.get('preguntar-salario'), 'done');
-    assert.strictEqual(estado.get('mencionar-k8s'), 'done');
+    const state = ctx.getChecklistState();
+    assert.strictEqual(state.get('ask-salary'), 'done');
+    assert.strictEqual(state.get('mention-k8s'), 'done');
 });
 
-test('sobrevive a un round-trip por JSON', () => {
-    const ctx = nuevoContexto();
-    ctx.addSpeech({ speaker: 'them', text: 'Hola' });
-    ctx.addScreen({ imageRef: 'img-1', caption: 'un IDE' });
+test('survives a JSON round-trip', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'them', text: 'Hello' });
+    ctx.addScreen({ imageRef: 'img-1', caption: 'an IDE' });
 
-    const restaurado = fromJSON(JSON.parse(JSON.stringify(ctx.toJSON())));
-    assert.strictEqual(restaurado.getTranscript(), '[Them]: Hola');
-    assert.strictEqual(restaurado.getEvents().length, 2);
-    assert.strictEqual(restaurado.toJSON().sessionId, 's1');
+    const restored = fromJSON(JSON.parse(JSON.stringify(ctx.toJSON())));
+    assert.strictEqual(restored.getTranscript(), '[Them]: Hello');
+    assert.strictEqual(restored.getEvents().length, 2);
+    assert.strictEqual(restored.toJSON().sessionId, 's1');
 });
 
-test('exige sessionId', () => {
+test('requires a sessionId', () => {
     assert.throws(() => createSessionContext({}), /sessionId/);
 });

@@ -2,8 +2,9 @@ const { createSessionContext } = require('./session-context');
 const { getProfilesDir, loadProfile } = require('./profiles');
 const { buildPayload } = require('./payload');
 
-// Une el hilo de contexto, el perfil y el proveedor. `sendToProvider` se inyecta:
-// es el seam que permite cambiar de proveedor sin tocar la lógica de memoria.
+// Joins the context thread, the profile and the provider. `sendToProvider` is
+// injected: it is the seam that lets the provider change without touching the
+// memory logic.
 function createSessionManager({ configDir, sendToProvider, onEvent = null, now = Date.now }) {
     if (!configDir) throw new TypeError('createSessionManager requires configDir');
     if (typeof sendToProvider !== 'function') throw new TypeError('createSessionManager requires sendToProvider');
@@ -12,8 +13,8 @@ function createSessionManager({ configDir, sendToProvider, onEvent = null, now =
     let profile = null;
     let pending = false;
 
-    // Único punto de salida de los eventos del hilo. La vista se suscribe aquí en
-    // vez de sondear el contexto, y un fallo pintando nunca corta la sesión.
+    // The single exit point for thread events. The view subscribes here instead of
+    // polling the context, and a rendering failure never takes the session down.
     function emit(event) {
         if (!event || !onEvent) return event;
         try {
@@ -42,7 +43,7 @@ function createSessionManager({ configDir, sendToProvider, onEvent = null, now =
 
     async function ask({ question, image = null }) {
         if (!context || !profile) throw new Error('No active session');
-        // B6: dos pulsaciones seguidas del atajo no deben lanzar dos peticiones.
+        // B6: two quick presses of the shortcut must not fire two requests.
         if (pending) throw new Error('A request is already in flight');
 
         pending = true;

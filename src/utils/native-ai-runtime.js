@@ -67,8 +67,8 @@ const WHISPER_MODELS = {
         url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin',
         sha256: 'cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356',
     },
-    // Multilingüe y con decoder destilado: mejor que small.en en inglés y además
-    // autodetecta idioma, a diferencia de las variantes .en (ver D4).
+    // Multilingual with a distilled decoder: better than small.en on English and it
+    // autodetects the language, unlike the .en variants (D4).
     'large-v3-turbo': {
         filename: 'ggml-large-v3-turbo.bin',
         url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',

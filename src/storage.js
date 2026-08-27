@@ -23,7 +23,7 @@ const DEFAULT_CREDENTIALS = {
 const DEFAULT_PREFERENCES = {
     customPrompt: '',
     providerMode: 'byok',
-    // D14: ejes independientes. providerMode se conserva para migrar preferencias viejas.
+    // D14: independent axes. providerMode is kept around to migrate old preferences.
     transcription: 'local-whisper',
     reasoning: 'gemini',
     selectedProfile: 'interview',
@@ -410,7 +410,7 @@ function saveSession(sessionId, data) {
         // Profile context - set once when session starts
         profile: data.profile || existingSession?.profile || null,
         customPrompt: data.customPrompt || existingSession?.customPrompt || null,
-        // Hilo único de eventos (sustituye a conversationHistory + screenAnalysisHistory)
+        // Single event thread (replaces conversationHistory + screenAnalysisHistory)
         events: data.events || existingSession?.events || [],
         digest: data.digest || existingSession?.digest || null,
     };
@@ -420,7 +420,7 @@ function saveSession(sessionId, data) {
 function getSession(sessionId) {
     const raw = readJsonFile(getSessionPath(sessionId), null);
     if (!raw) return null;
-    // Las sesiones grabadas antes del hilo único se migran al leerlas.
+    // Sessions recorded before the single thread are migrated as they are read.
     const { migrateLegacySession } = require('./core/session-context-migrate');
     return { ...raw, ...migrateLegacySession(raw) };
 }
@@ -472,8 +472,8 @@ function getAllSessions() {
 function deleteSession(sessionId) {
     const sessionPath = getSessionPath(sessionId);
     try {
-        // Las miniaturas viven en `history/<sessionId>/`: si se quedaran, borrar la
-        // sesión dejaría capturas de pantalla huérfanas en disco.
+        // Thumbnails live in `history/<sessionId>/`: left behind, deleting a session
+        // would strand screenshots on disk.
         require('./core/screenshots').deleteSessionScreenshots(getHistoryDir(), sessionId);
         if (fs.existsSync(sessionPath)) {
             fs.unlinkSync(sessionPath);

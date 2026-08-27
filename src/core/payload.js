@@ -1,8 +1,7 @@
-// Ensambla el payload en el orden que exige el prompt caching:
-// estable primero (instrucciones + notas + checklist), volátil después
-// (transcript + imagen + pregunta). Si el prefijo cambia entre invocaciones
-// la caché se invalida entera, así que aquí nada puede depender del tiempo
-// ni del contenido de la conversación.
+// Assembles the payload in the order prompt caching demands: stable first
+// (instructions + notes + checklist), volatile after (transcript + image +
+// question). If the prefix changes between calls the whole cache is invalidated,
+// so nothing here may depend on the clock or on the conversation.
 function buildPayload({ profile, sessionContext, question, image = null }) {
     if (!profile) throw new TypeError('buildPayload requires profile');
     if (!sessionContext) throw new TypeError('buildPayload requires sessionContext');

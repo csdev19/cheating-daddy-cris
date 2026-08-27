@@ -5,146 +5,148 @@ const os = require('node:os');
 const path = require('node:path');
 const { parseFrontmatter, listProfiles, describeProfiles, resolveProfileName, loadProfile, getProfilesDir } = require('../src/core/profiles');
 
-function crearPerfilDePrueba() {
-    const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'perfiles-'));
-    const perfil = path.join(raiz, 'entrevista-backend');
-    fs.mkdirSync(path.join(perfil, 'context'), { recursive: true });
+function makeSampleProfile() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-'));
+    const profile = path.join(root, 'backend-interview');
+    fs.mkdirSync(path.join(profile, 'context'), { recursive: true });
 
     fs.writeFileSync(
-        path.join(perfil, 'profile.md'),
-        ['---', 'name: Entrevista Backend', 'confidential: false', 'model: gemini-3.7-flash', '---', '', 'No me dictes qué decir.'].join('\n')
+        path.join(profile, 'profile.md'),
+        ['---', 'name: Backend Interview', 'confidential: false', 'model: gemini-3.7-flash', '---', '', 'Do not tell me what to say.'].join('\n')
     );
-    fs.writeFileSync(path.join(perfil, 'checklist.md'), '- Preguntar por el equipo\n- Mencionar Kubernetes\n\n- \n');
-    fs.writeFileSync(path.join(perfil, 'context', 'cv.md'), '15 años de backend.');
-    fs.writeFileSync(path.join(perfil, 'context', 'cifras.md'), 'Reduje latencia un 40%.');
+    fs.writeFileSync(path.join(profile, 'checklist.md'), '- Ask about the team\n- Mention Kubernetes\n\n- \n');
+    fs.writeFileSync(path.join(profile, 'context', 'cv.md'), '15 years of backend.');
+    fs.writeFileSync(path.join(profile, 'context', 'figures.md'), 'Cut latency by 40%.');
 
-    return raiz;
+    return root;
 }
 
-test('getProfilesDir cuelga de la carpeta de config', () => {
+test('getProfilesDir hangs off the config folder', () => {
     assert.strictEqual(getProfilesDir('/tmp/cfg'), path.join('/tmp/cfg', 'profiles'));
 });
 
-test('parseFrontmatter separa metadatos y cuerpo', () => {
-    const { meta, body } = parseFrontmatter('---\nname: Prueba\nconfidential: true\n---\n\nCuerpo aquí.');
-    assert.strictEqual(meta.name, 'Prueba');
+test('parseFrontmatter splits metadata from body', () => {
+    const { meta, body } = parseFrontmatter('---\nname: Sample\nconfidential: true\n---\n\nBody here.');
+    assert.strictEqual(meta.name, 'Sample');
     assert.strictEqual(meta.confidential, true);
-    assert.strictEqual(body, 'Cuerpo aquí.');
+    assert.strictEqual(body, 'Body here.');
 });
 
-test('parseFrontmatter tolera un archivo sin frontmatter', () => {
-    const { meta, body } = parseFrontmatter('Solo cuerpo.');
+test('parseFrontmatter tolerates a file with no frontmatter', () => {
+    const { meta, body } = parseFrontmatter('Body only.');
     assert.deepStrictEqual(meta, {});
-    assert.strictEqual(body, 'Solo cuerpo.');
+    assert.strictEqual(body, 'Body only.');
 });
 
-test('parseFrontmatter convierte booleanos pero deja el resto como texto', () => {
+test('parseFrontmatter converts booleans and leaves the rest as text', () => {
     const { meta } = parseFrontmatter('---\na: true\nb: false\nc: gemini-3.7-flash\n---\nx');
     assert.strictEqual(meta.a, true);
     assert.strictEqual(meta.b, false);
     assert.strictEqual(meta.c, 'gemini-3.7-flash');
 });
 
-test('listProfiles devuelve las carpetas ordenadas', () => {
-    const raiz = crearPerfilDePrueba();
-    fs.mkdirSync(path.join(raiz, 'aaa-primero'));
-    fs.writeFileSync(path.join(raiz, 'aaa-primero', 'profile.md'), '---\nname: Primero\n---\n\nHola.');
-    assert.deepStrictEqual(listProfiles(raiz), ['aaa-primero', 'entrevista-backend']);
+test('listProfiles returns the folders in order', () => {
+    const root = makeSampleProfile();
+    fs.mkdirSync(path.join(root, 'aaa-first'));
+    fs.writeFileSync(path.join(root, 'aaa-first', 'profile.md'), '---\nname: First\n---\n\nHello.');
+    assert.deepStrictEqual(listProfiles(root), ['aaa-first', 'backend-interview']);
 });
 
-// Una carpeta suelta sin profile.md no es un perfil. Si el selector la ofrece,
-// elegirla revienta la sesión al arrancar.
-test('listProfiles ignora carpetas sin profile.md', () => {
-    const raiz = crearPerfilDePrueba();
-    fs.mkdirSync(path.join(raiz, 'a-medias'));
+// A stray folder with no profile.md is not a profile. If the picker offers it,
+// choosing it breaks the session on start.
+test('listProfiles ignores folders without a profile.md', () => {
+    const root = makeSampleProfile();
+    fs.mkdirSync(path.join(root, 'half-made'));
 
-    assert.deepStrictEqual(listProfiles(raiz), ['entrevista-backend']);
+    assert.deepStrictEqual(listProfiles(root), ['backend-interview']);
 });
 
-test('describeProfiles da carpeta y nombre visible de cada perfil', () => {
-    const raiz = crearPerfilDePrueba();
+test('describeProfiles gives the folder and the display name of each profile', () => {
+    const root = makeSampleProfile();
 
-    assert.deepStrictEqual(describeProfiles(raiz), [{ dir: 'entrevista-backend', name: 'Entrevista Backend' }]);
+    assert.deepStrictEqual(describeProfiles(root), [{ dir: 'backend-interview', name: 'Backend Interview' }]);
 });
 
-test('describeProfiles usa el nombre de la carpeta si falta en el frontmatter', () => {
-    const raiz = crearPerfilDePrueba();
-    fs.mkdirSync(path.join(raiz, 'sin-nombre'));
-    fs.writeFileSync(path.join(raiz, 'sin-nombre', 'profile.md'), 'Sin frontmatter.');
+test('describeProfiles falls back to the folder name when the frontmatter has none', () => {
+    const root = makeSampleProfile();
+    fs.mkdirSync(path.join(root, 'unnamed'));
+    fs.writeFileSync(path.join(root, 'unnamed', 'profile.md'), 'No frontmatter.');
 
-    assert.deepStrictEqual(describeProfiles(raiz), [
-        { dir: 'entrevista-backend', name: 'Entrevista Backend' },
-        { dir: 'sin-nombre', name: 'sin-nombre' },
+    assert.deepStrictEqual(describeProfiles(root), [
+        { dir: 'backend-interview', name: 'Backend Interview' },
+        { dir: 'unnamed', name: 'unnamed' },
     ]);
 });
 
-test('resolveProfileName respeta el perfil pedido si existe', () => {
-    const raiz = crearPerfilDePrueba();
+test('resolveProfileName honours the requested profile when it exists', () => {
+    const root = makeSampleProfile();
 
-    assert.strictEqual(resolveProfileName(raiz, 'entrevista-backend'), 'entrevista-backend');
+    assert.strictEqual(resolveProfileName(root, 'backend-interview'), 'backend-interview');
 });
 
-// El perfil guardado en preferencias puede haber sido renombrado o borrado a mano.
-// Sin este respaldo, la app se queda sin arrancar y sin forma de recuperarse.
-test('resolveProfileName cae al primer perfil disponible si el pedido no existe', () => {
-    const raiz = crearPerfilDePrueba();
+// The profile stored in preferences may have been renamed or deleted by hand.
+// Without this fallback the app cannot start and has no way to recover.
+test('resolveProfileName falls back to the first available profile', () => {
+    const root = makeSampleProfile();
 
-    assert.strictEqual(resolveProfileName(raiz, 'no-existe'), 'entrevista-backend');
-    assert.strictEqual(resolveProfileName(raiz, null), 'entrevista-backend');
+    assert.strictEqual(resolveProfileName(root, 'does-not-exist'), 'backend-interview');
+    assert.strictEqual(resolveProfileName(root, null), 'backend-interview');
 });
 
-test('resolveProfileName devuelve null si no hay ningún perfil', () => {
-    const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'vacio-'));
+test('resolveProfileName returns null when there is no profile at all', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-'));
 
-    assert.strictEqual(resolveProfileName(raiz, 'interview'), null);
+    assert.strictEqual(resolveProfileName(root, 'interview'), null);
 });
 
-test('listProfiles devuelve vacío si el directorio no existe', () => {
-    assert.deepStrictEqual(listProfiles('/ruta/que/no/existe'), []);
+test('listProfiles returns empty when the directory does not exist', () => {
+    assert.deepStrictEqual(listProfiles('/path/that/does/not/exist'), []);
 });
 
-test('loadProfile lee instrucciones, contexto y checklist', () => {
-    const raiz = crearPerfilDePrueba();
-    const perfil = loadProfile(raiz, 'entrevista-backend');
+test('loadProfile reads instructions, context and checklist', () => {
+    const root = makeSampleProfile();
+    const profile = loadProfile(root, 'backend-interview');
 
-    assert.strictEqual(perfil.meta.name, 'Entrevista Backend');
-    assert.strictEqual(perfil.meta.confidential, false);
-    assert.strictEqual(perfil.meta.model, 'gemini-3.7-flash');
-    assert.strictEqual(perfil.instructions, 'No me dictes qué decir.');
+    assert.strictEqual(profile.meta.name, 'Backend Interview');
+    assert.strictEqual(profile.meta.confidential, false);
+    assert.strictEqual(profile.meta.model, 'gemini-3.7-flash');
+    assert.strictEqual(profile.instructions, 'Do not tell me what to say.');
 
     assert.deepStrictEqual(
-        perfil.contextFiles.map(f => f.file),
-        ['cifras.md', 'cv.md']
+        profile.contextFiles.map(f => f.file),
+        ['cv.md', 'figures.md']
     );
-    assert.strictEqual(perfil.contextFiles[1].content, '15 años de backend.');
+    assert.strictEqual(profile.contextFiles[0].content, '15 years of backend.');
 });
 
-test('loadProfile parsea el checklist e ignora líneas vacías', () => {
-    const raiz = crearPerfilDePrueba();
-    const perfil = loadProfile(raiz, 'entrevista-backend');
+test('loadProfile parses the checklist and skips empty lines', () => {
+    const root = makeSampleProfile();
+    const profile = loadProfile(root, 'backend-interview');
 
-    assert.strictEqual(perfil.checklist.length, 2);
-    assert.strictEqual(perfil.checklist[0].text, 'Preguntar por el equipo');
-    assert.strictEqual(perfil.checklist[0].id, 'preguntar-por-el-equipo');
+    assert.strictEqual(profile.checklist.length, 2);
+    assert.strictEqual(profile.checklist[0].text, 'Ask about the team');
+    assert.strictEqual(profile.checklist[0].id, 'ask-about-the-team');
 });
 
-test('loadProfile funciona sin checklist ni carpeta context', () => {
-    const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'perfiles-'));
-    fs.mkdirSync(path.join(raiz, 'minimo'));
-    fs.writeFileSync(path.join(raiz, 'minimo', 'profile.md'), 'Solo instrucciones.');
+test('loadProfile works with no checklist and no context folder', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-'));
+    fs.mkdirSync(path.join(root, 'minimal'));
+    fs.writeFileSync(path.join(root, 'minimal', 'profile.md'), 'Instructions only.');
 
-    const perfil = loadProfile(raiz, 'minimo');
-    assert.deepStrictEqual(perfil.contextFiles, []);
-    assert.deepStrictEqual(perfil.checklist, []);
-    assert.strictEqual(perfil.meta.name, 'minimo');
+    const profile = loadProfile(root, 'minimal');
+    assert.deepStrictEqual(profile.contextFiles, []);
+    assert.deepStrictEqual(profile.checklist, []);
+    assert.strictEqual(profile.meta.name, 'minimal');
 });
 
-test('loadProfile falla claramente si el perfil no existe', () => {
-    const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'perfiles-'));
-    assert.throws(() => loadProfile(raiz, 'inexistente'), /inexistente/);
+test('loadProfile fails clearly when the profile does not exist', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'profiles-'));
+    assert.throws(() => loadProfile(root, 'missing'), /missing/);
 });
 
-test('slugify normaliza acentos y espacios', () => {
+// Accented input is the point of this test: checklist ids must stay URL-safe
+// whatever language the user writes their checklist in.
+test('slugify normalises accents and spaces', () => {
     const { slugify } = require('../src/core/profiles');
-    assert.strictEqual(slugify('Preguntar por la Migración de BD'), 'preguntar-por-la-migracion-de-bd');
+    assert.strictEqual(slugify('Ask about the Migración de BD'), 'ask-about-the-migracion-de-bd');
 });

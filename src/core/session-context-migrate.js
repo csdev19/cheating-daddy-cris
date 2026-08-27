@@ -1,6 +1,6 @@
-// Convierte el esquema antiguo { transcription, ai_response } al hilo de eventos.
-// En el esquema antiguo `transcription` era siempre el entrevistador: la app
-// nunca escuchaba al usuario (ver hallazgo H5).
+// Converts the old { transcription, ai_response } schema into the event thread.
+// In that schema `transcription` was always the interviewer: the app never
+// listened to the user at all (finding H5).
 function migrateLegacySession(obj) {
     if (Array.isArray(obj.events)) return obj;
 

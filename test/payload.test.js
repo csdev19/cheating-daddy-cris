@@ -3,90 +3,96 @@ const assert = require('node:assert');
 const { buildPayload } = require('../src/core/payload');
 const { createSessionContext } = require('../src/core/session-context');
 
-const perfilDePrueba = {
-    name: 'entrevista-backend',
-    meta: { name: 'Entrevista Backend', confidential: false, model: 'gemini-3.7-flash' },
-    instructions: 'No me dictes qué decir.',
+const sampleProfile = {
+    name: 'backend-interview',
+    meta: { name: 'Backend Interview', confidential: false, model: 'gemini-3.7-flash' },
+    instructions: 'Do not tell me what to say.',
     contextFiles: [
-        { file: 'cifras.md', content: 'Reduje latencia un 40%.' },
-        { file: 'cv.md', content: '15 años de backend.' },
+        { file: 'figures.md', content: 'Cut latency by 40%.' },
+        { file: 'cv.md', content: '15 years of backend.' },
     ],
     checklist: [
-        { id: 'preguntar-equipo', text: 'Preguntar por el equipo' },
-        { id: 'mencionar-k8s', text: 'Mencionar Kubernetes' },
+        { id: 'ask-team', text: 'Ask about the team' },
+        { id: 'mention-k8s', text: 'Mention Kubernetes' },
     ],
 };
 
-function contextoConVoz() {
-    let reloj = 1000;
-    const ctx = createSessionContext({ sessionId: 's1', now: () => reloj++ });
-    ctx.addSpeech({ speaker: 'them', text: '¿Qué has hecho con Node?' });
-    ctx.addSpeech({ speaker: 'me', text: 'Backend a escala.' });
+function contextWithSpeech() {
+    let clock = 1000;
+    const ctx = createSessionContext({ sessionId: 's1', now: () => clock++ });
+    ctx.addSpeech({ speaker: 'them', text: 'What have you done with Node?' });
+    ctx.addSpeech({ speaker: 'me', text: 'Backend at scale.' });
     return ctx;
 }
 
-test('el system incluye instrucciones y todos los archivos de contexto', () => {
-    const p = buildPayload({ profile: perfilDePrueba, sessionContext: contextoConVoz(), question: '¿qué digo?' });
-    assert.ok(p.system.includes('No me dictes qué decir.'));
-    assert.ok(p.system.includes('Reduje latencia un 40%.'));
-    assert.ok(p.system.includes('15 años de backend.'));
+test('system carries the instructions and every context file', () => {
+    const p = buildPayload({ profile: sampleProfile, sessionContext: contextWithSpeech(), question: 'what do I say?' });
+    assert.ok(p.system.includes('Do not tell me what to say.'));
+    assert.ok(p.system.includes('Cut latency by 40%.'));
+    assert.ok(p.system.includes('15 years of backend.'));
 });
 
-test('el system NO incluye el transcript (debe quedar fuera del prefijo cacheado)', () => {
-    const p = buildPayload({ profile: perfilDePrueba, sessionContext: contextoConVoz(), question: '¿qué digo?' });
-    assert.ok(!p.system.includes('Backend a escala.'));
-    assert.ok(p.transcript.includes('Backend a escala.'));
+test('system does NOT carry the transcript (it must stay out of the cached prefix)', () => {
+    const p = buildPayload({ profile: sampleProfile, sessionContext: contextWithSpeech(), question: 'what do I say?' });
+    assert.ok(!p.system.includes('Backend at scale.'));
+    assert.ok(p.transcript.includes('Backend at scale.'));
 });
 
-test('el system es idéntico entre invocaciones aunque crezca el transcript', () => {
-    const ctx = contextoConVoz();
-    const primero = buildPayload({ profile: perfilDePrueba, sessionContext: ctx, question: 'a' });
-    ctx.addSpeech({ speaker: 'them', text: 'Una pregunta más.' });
-    const segundo = buildPayload({ profile: perfilDePrueba, sessionContext: ctx, question: 'b' });
+test('system stays identical across calls even as the transcript grows', () => {
+    const ctx = contextWithSpeech();
+    const first = buildPayload({ profile: sampleProfile, sessionContext: ctx, question: 'a' });
+    ctx.addSpeech({ speaker: 'them', text: 'One more question.' });
+    const second = buildPayload({ profile: sampleProfile, sessionContext: ctx, question: 'b' });
 
-    assert.strictEqual(primero.system, segundo.system);
-    assert.notStrictEqual(primero.transcript, segundo.transcript);
+    assert.strictEqual(first.system, second.system);
+    assert.notStrictEqual(first.transcript, second.transcript);
 });
 
-test('el checklist aparece con su estado actual', () => {
-    const ctx = contextoConVoz();
-    ctx.addChecklist({ itemId: 'mencionar-k8s', status: 'done' });
+test('the checklist shows up with its current state', () => {
+    const ctx = contextWithSpeech();
+    ctx.addChecklist({ itemId: 'mention-k8s', status: 'done' });
 
-    const p = buildPayload({ profile: perfilDePrueba, sessionContext: ctx, question: 'x' });
-    assert.ok(p.system.includes('Preguntar por el equipo'));
-    assert.ok(p.system.includes('Mencionar Kubernetes'));
+    const p = buildPayload({ profile: sampleProfile, sessionContext: ctx, question: 'x' });
+    assert.ok(p.system.includes('Ask about the team'));
+    assert.ok(p.system.includes('Mention Kubernetes'));
 });
 
-test('propaga modelo y flag de confidencialidad del perfil', () => {
-    const p = buildPayload({ profile: perfilDePrueba, sessionContext: contextoConVoz(), question: 'x' });
+test('propagates the model and the confidential flag from the profile', () => {
+    const p = buildPayload({ profile: sampleProfile, sessionContext: contextWithSpeech(), question: 'x' });
     assert.strictEqual(p.model, 'gemini-3.7-flash');
     assert.strictEqual(p.confidential, false);
 
-    const confidencial = { ...perfilDePrueba, meta: { ...perfilDePrueba.meta, confidential: true } };
-    assert.strictEqual(buildPayload({ profile: confidencial, sessionContext: contextoConVoz(), question: 'x' }).confidential, true);
+    const confidential = { ...sampleProfile, meta: { ...sampleProfile.meta, confidential: true } };
+    assert.strictEqual(buildPayload({ profile: confidential, sessionContext: contextWithSpeech(), question: 'x' }).confidential, true);
 });
 
-test('la imagen es opcional y se propaga tal cual', () => {
-    const sinImagen = buildPayload({ profile: perfilDePrueba, sessionContext: contextoConVoz(), question: 'x' });
-    assert.strictEqual(sinImagen.image, null);
+test('the image is optional and travels through untouched', () => {
+    const withoutImage = buildPayload({ profile: sampleProfile, sessionContext: contextWithSpeech(), question: 'x' });
+    assert.strictEqual(withoutImage.image, null);
 
-    const conImagen = buildPayload({
-        profile: perfilDePrueba,
-        sessionContext: contextoConVoz(),
+    const withImage = buildPayload({
+        profile: sampleProfile,
+        sessionContext: contextWithSpeech(),
         question: 'x',
         image: { data: 'YWJj', mimeType: 'image/jpeg' },
     });
-    assert.strictEqual(conImagen.image.data, 'YWJj');
+    assert.strictEqual(withImage.image.data, 'YWJj');
 });
 
-test('funciona con un perfil sin contexto ni checklist', () => {
-    const minimo = { name: 'm', meta: { name: 'M', confidential: false, model: null }, instructions: 'Sé breve.', contextFiles: [], checklist: [] };
-    const p = buildPayload({ profile: minimo, sessionContext: contextoConVoz(), question: 'x' });
-    assert.ok(p.system.includes('Sé breve.'));
+test('works with a profile that has no context and no checklist', () => {
+    const minimal = {
+        name: 'm',
+        meta: { name: 'M', confidential: false, model: null },
+        instructions: 'Keep it short.',
+        contextFiles: [],
+        checklist: [],
+    };
+    const p = buildPayload({ profile: minimal, sessionContext: contextWithSpeech(), question: 'x' });
+    assert.ok(p.system.includes('Keep it short.'));
     assert.strictEqual(p.model, null);
 });
 
-test('exige profile y sessionContext', () => {
-    assert.throws(() => buildPayload({ sessionContext: contextoConVoz(), question: 'x' }), /profile/);
-    assert.throws(() => buildPayload({ profile: perfilDePrueba, question: 'x' }), /sessionContext/);
+test('requires profile and sessionContext', () => {
+    assert.throws(() => buildPayload({ sessionContext: contextWithSpeech(), question: 'x' }), /profile/);
+    assert.throws(() => buildPayload({ profile: sampleProfile, question: 'x' }), /sessionContext/);
 });

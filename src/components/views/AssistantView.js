@@ -100,7 +100,7 @@ export class AssistantView extends LitElement {
             white-space: pre-wrap;
         }
 
-        /* Marca de canal: de un vistazo se ve de quién es cada turno sin leer la etiqueta. */
+        /* Channel marker: whose turn it is reads at a glance, without the label. */
         .row-speech {
             border-left: 2px solid transparent;
             padding-left: var(--space-md);
@@ -214,7 +214,7 @@ export class AssistantView extends LitElement {
             font-size: var(--font-size-sm);
         }
 
-        /* ── Markdown de la respuesta ── */
+        /* ── Answer markdown ── */
 
         .md h1,
         .md h2,
@@ -459,8 +459,8 @@ export class AssistantView extends LitElement {
         this._askCountWhenStarted = 0;
     }
 
-    // Las filas salen de `projectThread` (src/core/thread-view.js), el mismo módulo
-    // que usa el historial: una sesión en curso y una guardada se pintan igual.
+    // Rows come from `projectThread` (src/core/thread-view.js), the same module the
+    // history uses: a live session and a stored one render identically.
     getRows() {
         const project = window.threadView?.projectThread;
         const rows = project ? project(this.events || []) : [];
@@ -470,8 +470,8 @@ export class AssistantView extends LitElement {
         }
         rows.sort((a, b) => a.t - b.t);
 
-        // La pregunta en curso va siempre al final: aún no está en el hilo porque
-        // el evento `ask` no se registra hasta que hay respuesta.
+        // The in-flight question always goes last: it is not in the thread yet,
+        // because the `ask` event is only recorded once there is an answer.
         if (this.pendingAsk) {
             rows.push({
                 id: 'pending',
@@ -504,8 +504,8 @@ export class AssistantView extends LitElement {
         return content;
     }
 
-    // Lit acepta un nodo DOM como valor, así que el markdown se monta aparte en vez
-    // de escribir innerHTML sobre lo que Lit gestiona.
+    // Lit accepts a DOM node as a value, so the markdown is built separately rather
+    // than writing innerHTML over something Lit manages.
     markdownNode(content) {
         const el = document.createElement('div');
         el.className = 'md';
@@ -513,7 +513,7 @@ export class AssistantView extends LitElement {
         return el;
     }
 
-    // Las miniaturas viven en disco; se piden por su ref y se cachean en memoria.
+    // Thumbnails live on disk; they are fetched by ref and cached in memory.
     loadThumb(ref) {
         if (!ref || this._thumbs.has(ref) || !window.require) return;
         this._thumbs.set(ref, null);
@@ -524,9 +524,9 @@ export class AssistantView extends LitElement {
         });
     }
 
-    // Los atajos de "respuesta anterior/siguiente" ya no cambian de respuesta:
-    // saltan entre las respuestas del asistente dentro del hilo, que es lo que se
-    // suele querer releer cuando la conversación ha seguido avanzando.
+    // The "previous/next response" shortcuts no longer switch responses: they jump
+    // between the assistant's answers inside the thread, which is what you usually
+    // want to reread once the conversation has moved on.
     jumpToAnswer(direction) {
         const thread = this.shadowRoot.querySelector('.thread');
         if (!thread) return;
@@ -534,8 +534,8 @@ export class AssistantView extends LitElement {
         const answers = Array.from(this.shadowRoot.querySelectorAll('.row-ask'));
         if (!answers.length) return;
 
-        // `offsetTop` mide contra el offsetParent, que aquí puede caer fuera del
-        // shadow root: se calcula contra el rect del propio contenedor.
+        // `offsetTop` measures against the offsetParent, which here can fall outside
+        // the shadow root: measure against the container's own rect instead.
         const threadTop = thread.getBoundingClientRect().top;
         const tops = answers.map(el => el.getBoundingClientRect().top - threadTop + thread.scrollTop);
         const current = thread.scrollTop;
@@ -757,8 +757,8 @@ export class AssistantView extends LitElement {
         }
     }
 
-    // Solo se sigue el final del hilo si ya estabas al final: si has subido a releer
-    // algo, la vista no te arrastra abajo cada vez que alguien habla.
+    // Only follow the tail if you were already at the tail: if you scrolled up to
+    // reread something, the view will not drag you back down every time someone talks.
     isNearBottom() {
         const thread = this.shadowRoot.querySelector('.thread');
         if (!thread) return true;
@@ -792,7 +792,7 @@ export class AssistantView extends LitElement {
             }
         }
 
-        // La captura termina cuando su pregunta entra en el hilo, o cuando falla.
+        // The capture finishes when its question lands in the thread, or when it fails.
         if (this.isAnalyzing) {
             const asks = (this.events || []).filter(e => e.kind === 'ask').length;
             if (asks > this._askCountWhenStarted || this.pendingAsk?.error) this.isAnalyzing = false;

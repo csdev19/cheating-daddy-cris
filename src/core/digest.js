@@ -12,8 +12,8 @@ function buildDigestPrompt(transcript) {
     ].join('\n');
 }
 
-// Añade el resumen al historial del perfil, que la siguiente sesión cargará como
-// una nota más (D17). Se recorta para que el prefijo cacheado no crezca sin límite.
+// Appends the summary to the profile's history, which the next session loads as
+// one more note (D17). Trimmed so the cached prefix cannot grow without bound.
 function appendDigest({ profilesDir, profileName, digest, date, maxEntries = 20 }) {
     const ruta = path.join(profilesDir, profileName, 'context', 'history.md');
     fs.mkdirSync(path.dirname(ruta), { recursive: true });

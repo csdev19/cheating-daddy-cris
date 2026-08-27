@@ -265,7 +265,7 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
         }
     }
 
-    // M4: atajo para preguntar sin adjuntar pantalla.
+    // M4: shortcut to ask without attaching the screen.
     if (keybinds.askNoScreen) {
         try {
             globalShortcut.register(keybinds.askNoScreen, () => sendToRenderer('ask-no-screen'));
@@ -288,8 +288,8 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
                         geminiSessionRef.current = null;
                     }
 
-                    // B7: clearAll() solo borraba el disco; el transcript vivía en
-                    // memoria del main hasta que moría el proceso.
+                    // B7: clearAll() only wiped the disk; the transcript lived on in
+                    // the main process memory until it died.
                     try {
                         require('./gemini').endSessionForEmergency();
                     } catch (error) {

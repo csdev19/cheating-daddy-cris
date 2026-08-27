@@ -524,7 +524,7 @@ export class CheatingDaddyApp extends LitElement {
 
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            // El hilo del main es la fuente de verdad; la vista solo lo proyecta.
+            // The thread in main is the source of truth; the view only projects it.
             ipcRenderer.on('thread-snapshot', (_, { events }) => {
                 this.threadEvents = events || [];
                 this.pendingAsk = null;
@@ -539,8 +539,8 @@ export class CheatingDaddyApp extends LitElement {
                 this.pendingAsk = this.pendingAsk ? { ...this.pendingAsk, error } : null;
                 this.streamingAnswer = '';
             });
-            // La respuesta llega troceada; se pinta en la fila pendiente hasta que
-            // el evento `ask` del hilo la sustituye ya completa.
+            // The answer arrives in chunks; it is painted into the pending row until
+            // the thread's `ask` event replaces it, complete.
             ipcRenderer.on('new-response', (_, response) => {
                 this.streamingAnswer = response;
             });
@@ -559,8 +559,8 @@ export class CheatingDaddyApp extends LitElement {
                 this._localAiDownloadProgress = progress;
             });
 
-            // La vista puede remontarse a mitad de sesión (al volver del historial,
-            // por ejemplo) y entonces se ha perdido todo lo emitido hasta ahora.
+            // The view can remount mid-session (coming back from history, say), and
+            // by then everything emitted so far has been missed.
             ipcRenderer.invoke('get-thread').then(({ events }) => {
                 if (events && events.length) this.threadEvents = events;
             });
@@ -640,15 +640,15 @@ export class CheatingDaddyApp extends LitElement {
 
     appendThreadEvent(event) {
         this.threadEvents = [...this.threadEvents, event];
-        // El evento `ask` ya trae la respuesta completa: la fila pendiente sobra.
+        // The `ask` event already carries the full answer: the pending row is redundant.
         if (event.kind === 'ask') {
             this.pendingAsk = null;
             this.streamingAnswer = '';
         }
     }
 
-    // Errores que no son parte de la conversación (red, permisos) pero que el
-    // usuario tiene que ver sin salir de la vista.
+    // Errors that are not part of the conversation (network, permissions) but that
+    // the user still has to see without leaving the view.
     addNotice(text) {
         this.notices = [...this.notices, { t: Date.now(), text }];
         this.showToast(text);
@@ -696,8 +696,8 @@ export class CheatingDaddyApp extends LitElement {
     // ── Session start ──
 
     async handleStart() {
-        // El main resuelve transcripción y razonamiento a partir del perfil y las
-        // preferencias (D14); aquí solo se dice con qué perfil se empieza.
+        // Main resolves transcription and reasoning from the profile and the
+        // preferences (D14); all that is said here is which profile to start with.
         const result = await cheatingDaddy.initializeSession(this.selectedProfile);
 
         if (!result.success) {

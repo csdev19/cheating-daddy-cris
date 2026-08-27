@@ -2,11 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { frame16k } = require('./helpers/pcm');
 
-test('el runner de tests funciona', () => {
+test('the test runner works', () => {
     assert.strictEqual(1 + 1, 2);
 });
 
-test('el helper de PCM produce el tamaño y la amplitud esperados', () => {
+test('the PCM helper produces the expected size and amplitude', () => {
     const buffer = frame16k(0.5);
     assert.strictEqual(buffer.length, 3200);
     assert.strictEqual(Math.abs(buffer.readInt16LE(0)) > 16000, true);

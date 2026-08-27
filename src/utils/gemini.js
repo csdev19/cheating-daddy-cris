@@ -64,8 +64,8 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAY = 2000;
 
-// Traduce el payload neutro a una petición de Gemini. El bloque `system` va primero
-// y sin variar durante la reunión: es el prefijo que se cachea.
+// Translates the neutral payload into a Gemini request. The `system` block goes
+// first and stays unchanged through the meeting: it is the prefix that gets cached.
 async function sendPayloadToGemini(payload) {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error('Missing Gemini API key');
@@ -82,7 +82,7 @@ async function sendPayloadToGemini(payload) {
     }
     parts.push({ text: payload.question });
 
-    // B5: streaming para no dejar la ventana en blanco 2-4 s.
+    // B5: stream so the window is not left blank for 2-4s.
     const stream = await client.models.generateContentStream({
         model,
         config: { systemInstruction: payload.system },
@@ -102,8 +102,8 @@ async function sendPayloadToGemini(payload) {
         if (chunk.usageMetadata) usage = chunk.usageMetadata;
     }
 
-    // B4: si esto es 0 de forma sostenida, la caché implícita no está funcionando;
-    // habría que mover el bloque estable al primer mensaje 'user' de contents.
+    // B4: if this stays at 0, implicit caching is not working and the stable block
+    // should move into the first 'user' message of contents.
     if (usage) {
         console.log('[Gemini] tokens cacheados:', usage.cachedContentTokenCount ?? 0, 'de', usage.promptTokenCount);
     }
@@ -111,8 +111,8 @@ async function sendPayloadToGemini(payload) {
     return fullText.trim();
 }
 
-// El hilo se guarda con un respiro: durante una reunión entra un evento de voz
-// cada pocos segundos y no hace falta reescribir el JSON en cada uno.
+// The thread is saved with some slack: during a meeting a speech event lands every
+// few seconds and there is no need to rewrite the JSON for each one.
 const THREAD_SAVE_DEBOUNCE_MS = 1000;
 let threadSaveTimer = null;
 
@@ -145,14 +145,14 @@ function flushThreadSave() {
 
 const sessionManager = createSessionManager({
     configDir: getConfigDir(),
-    // La vista es una proyección del hilo: cada evento que entra se le manda tal cual.
+    // The view is a projection of the thread: every event that lands is forwarded as is.
     onEvent: event => {
         sendToRenderer('thread-event', event);
         scheduleThreadSave();
     },
-    // El adaptador de proveedor vive aquí: es lo único que sabe de Gemini.
-    // Aplica D13: un perfil confidencial nunca sale de la máquina, aunque el modo
-    // activo sea de nube. Prefiere una respuesta peor a una fuga.
+    // The provider adapter lives here: it is the only thing that knows about Gemini.
+    // Applies D13: a confidential profile never leaves the machine, even when the
+    // active mode is a cloud one. A worse answer beats a leak.
     sendToProvider: async payload => {
         if (payload.confidential) {
             if (!getLocalAi().isReasoningActive()) {
@@ -164,8 +164,8 @@ const sessionManager = createSessionManager({
     },
 });
 
-// D17: cierra el bucle entre reuniones. El resumen se añade al historial del perfil,
-// y la siguiente sesión con ese mismo perfil lo carga como una nota más.
+// D17: closes the loop between meetings. The summary is appended to the profile's
+// history, and the next session on that profile loads it as one more note.
 async function generateSessionDigest() {
     const ctx = sessionManager.getContext();
     const profile = sessionManager.getProfile();
@@ -207,8 +207,8 @@ async function generateSessionDigest() {
     }
 }
 
-// La respuesta tarda segundos: la vista pinta la pregunta en cuanto sale, y la
-// sustituye por el evento real del hilo cuando llega (B5).
+// The answer takes seconds: the view paints the question as soon as it goes out and
+// replaces it with the real thread event once that arrives (B5).
 async function runAsk({ question, image = null, imageRef = null }) {
     sendToRenderer('ask-started', { question, imageRef, t: Date.now() });
     try {
@@ -244,8 +244,8 @@ function buildContextMessage() {
 
 // Conversation management functions
 function initializeNewSession(profile = null, customPrompt = null) {
-    // Si ya hay un hilo abierto, el id lo manda el gestor de sesión: si no, las
-    // miniaturas y el JSON del hilo acabarían bajo dos sesiones distintas.
+    // If a thread is already open the session manager owns the id; otherwise the
+    // thumbnails and the thread JSON would end up under two different sessions.
     const active = sessionManager.getContext();
     currentSessionId = active ? active.toJSON().sessionId : Date.now().toString();
     startTransportLog(currentSessionId);
@@ -820,8 +820,8 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
     const enabledTools = await getEnabledTools();
     const googleSearchEnabled = enabledTools.some(tool => tool.googleSearch);
 
-    // Las instrucciones vienen del perfil del usuario (profile.md), no de los
-    // profilePrompts hardcodeados que se retiraron con la Tarea 11 (H6).
+    // Instructions come from the user's profile (profile.md), not from the hardcoded
+    // profilePrompts that task 11 removed (H6).
     const systemPrompt = customPrompt || '';
     currentSystemPrompt = systemPrompt;
 
@@ -1219,12 +1219,12 @@ async function sendImageToGeminiHttp(base64Data, prompt) {
 }
 
 function setupGeminiIpcHandlers(geminiSessionRef) {
-    // La transcripción local alimenta el hilo; no invoca al modelo (D1).
+    // Local transcription feeds the thread; it never calls the model (D1).
     getLocalAi().setTranscriptionHandler((speaker, text) => {
         sessionManager.recordSpeech(speaker, text);
     });
 
-    // Punto de entrada único de sesión: decide qué arrancar según los dos ejes (D14).
+    // Single session entry point: decides what to start from the two axes (D14).
     ipcMain.handle('initialize-session', async (event, { profileName }) => {
         try {
             const prefs = getPreferences();
@@ -1239,8 +1239,9 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
             const modes = resolveModes(prefs, profile.meta);
             currentProviderMode = modes.reasoning === 'local-llama' ? 'local' : 'byok';
 
-            // Sin clave el fallo aparecería más tarde, al preguntar, con la reunión
-            // ya empezada. Mejor negarse aquí y que la UI pida la clave.
+            // Without a key the failure would surface later, on the first question,
+            // with the meeting already under way. Better to refuse here and let the
+            // UI ask for it.
             if (modes.reasoning !== 'local-llama' && !getApiKey()) {
                 throw new Error('missing-api-key');
             }
@@ -1365,8 +1366,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: false, error: 'Image too small' };
             }
 
-            // La imagen que ve el modelo es grande; al hilo va solo la miniatura,
-            // para que luego puedas ver qué estaba mirando cuando respondió.
+            // The image the model sees is large; only the thumbnail goes into the
+            // thread, so you can later see what it was looking at when it answered.
             let imageRef = null;
             if (currentSessionId) {
                 try {
@@ -1408,8 +1409,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
     });
 
-    // Se perdieron por accidente al introducir el gestor de sesión (c908ffe). Sin
-    // ellos no hay audio de sistema en macOS, es decir: no existe el canal 'them'.
+    // Lost by accident when the session manager landed (c908ffe). Without them there
+    // is no system audio on macOS, which means the 'them' channel does not exist.
     ipcMain.handle('start-macos-audio', async () => {
         if (process.platform !== 'darwin') {
             return { success: false, error: 'System audio capture is only available on macOS' };
@@ -1433,7 +1434,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
     });
 
-    // La vista pide la miniatura por su ref; el binario nunca viaja dentro del hilo.
+    // The view asks for a thumbnail by ref; the binary never travels inside the thread.
     ipcMain.handle('read-screenshot', async (event, ref) => {
         try {
             const file = resolveScreenshotPath(getHistoryDir(), ref);
@@ -1447,8 +1448,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
     });
 
-    // La vista puede montarse después de que empiece la sesión (o remontarse al
-    // volver del historial), así que necesita poder pedir el hilo entero.
+    // The view can mount after the session started (or remount on the way back from
+    // history), so it needs to be able to ask for the whole thread.
     ipcMain.handle('get-thread', async () => {
         const ctx = sessionManager.getContext();
         if (!ctx) return { sessionId: null, events: [] };
@@ -1459,8 +1460,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     ipcMain.handle('close-session', async event => {
         try {
             stopMacOSAudioCapture();
-            // El resumen cierra la sesión, así que el hilo se guarda antes de que
-            // se vacíe el contexto.
+            // Generating the summary ends the session, so the thread is saved before
+            // the context is emptied.
             flushThreadSave();
             await generateSessionDigest();
 

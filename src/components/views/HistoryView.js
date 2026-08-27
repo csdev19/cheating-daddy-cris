@@ -399,8 +399,8 @@ export class HistoryView extends LitElement {
         });
     }
 
-    // Las miniaturas viven en disco bajo `history/<sessionId>/`; el hilo solo
-    // guarda la ref, así que se piden al main cuando hacen falta.
+    // Thumbnails live on disk under `history/<sessionId>/`; the thread only keeps
+    // the ref, so they are fetched from main on demand.
     renderShot(ref) {
         if (!ref) return '';
         if (!this._thumbs.has(ref) && window.require) {
@@ -414,8 +414,8 @@ export class HistoryView extends LitElement {
         return src ? html`<img class="history-shot" src=${src} alt="Screen capture" />` : '';
     }
 
-    // Misma proyección que la vista en vivo (src/core/thread-view.js): los segmentos
-    // troceados por el VAD se releen fusionados, igual que se vieron durante la sesión.
+    // Same projection as the live view (src/core/thread-view.js): segments chopped up
+    // by the VAD are reread merged, exactly as they looked during the session.
     collectConversation(session) {
         const project = window.threadView?.projectThread;
         const rows = project ? project(session.events || []) : [];
@@ -440,7 +440,7 @@ export class HistoryView extends LitElement {
             const digest = this.selectedSession.digest;
             if (!messages.length && !digest) return html`<div class="empty">No conversation data.</div>`;
 
-            // El resumen va primero: normalmente es lo único que hace falta releer (M2).
+            // The summary comes first: usually it is the only thing worth rereading (M2).
             const resumen = digest
                 ? html`<div class="session-digest">
                       <div class="session-digest-title">Summary</div>

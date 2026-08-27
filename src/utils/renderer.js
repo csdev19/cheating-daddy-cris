@@ -120,9 +120,9 @@ async function loadPreferencesCache() {
 // Initialize preferences cache
 loadPreferencesCache();
 
-// OfflineAudioContext aplica el filtro anti-aliasing que la interpolación lineal
-// del main process no hacía: al bajar de 24k a 16k sin paso-bajo, todo lo que está
-// por encima de 8 kHz se pliega hacia abajo y ensucia las sibilantes (hallazgo H7).
+// OfflineAudioContext applies the anti-aliasing filter the main process's linear
+// interpolation never did: dropping 24k to 16k without a low-pass folds everything
+// above 8 kHz back down and muddies the sibilants (finding H7).
 async function resampleTo16k(float32Chunk, sourceRate) {
     if (sourceRate === 16000) return float32Chunk;
 
@@ -167,8 +167,8 @@ async function listProfiles() {
     return result.success ? result.data : [];
 }
 
-// Punto de entrada único de sesión. El renderer ya no elige proveedor: manda el
-// perfil y el main resuelve transcripción y razonamiento como ejes separados (D14).
+// Single session entry point. The renderer no longer picks a provider: it sends the
+// profile and main resolves transcription and reasoning as separate axes (D14).
 async function initializeSession(profileName = 'interview') {
     const result = await ipcRenderer.invoke('initialize-session', { profileName });
 
@@ -457,9 +457,9 @@ function setupWindowsLoopbackProcessing() {
     audioProcessor.connect(audioContext.destination);
 }
 
-// La captura automática cada N segundos se eliminó: en diseño reactivo (D1) el
-// modelo solo se invoca con el atajo, así que enviar imágenes en bucle solo
-// quemaba llamadas que nadie había pedido.
+// The automatic capture every N seconds is gone: under the reactive design (D1) the
+// model is only called from the shortcut, so sending images on a loop just burned
+// calls nobody asked for.
 
 async function captureManualScreenshot(imageQuality = null) {
     console.log('Manual screenshot triggered');
@@ -564,8 +564,8 @@ async function captureManualScreenshot(imageQuality = null) {
     );
 }
 
-// El hilo guarda una miniatura, no la imagen que ve el modelo: lo que se persiste
-// solo tiene que servir para reconocer de un vistazo qué había en pantalla.
+// The thread stores a thumbnail, not the image the model sees: what gets persisted
+// only has to be good enough to recognise at a glance what was on screen.
 const THUMBNAIL_WIDTH = 320;
 
 function buildThumbnail(srcW, srcH) {
@@ -689,8 +689,8 @@ ipcRenderer.on('save-screen-analysis', async (event, data) => {
 });
 
 // Listen for emergency erase command from main process
-// M4: preguntar sin mandar pantalla. "Qué me falta decir" no necesita imagen,
-// y mandarla encarece y a veces despista al modelo.
+// M4: ask without sending the screen. "What am I forgetting" needs no image, and
+// sending one costs more and sometimes throws the model off.
 ipcRenderer.on('ask-no-screen', async () => {
     const result = await ipcRenderer.invoke('send-text-message', 'What am I forgetting to say or ask?');
     if (!result.success) cheatingDaddy.addNotice(`Error: ${result.error}`);

@@ -17,8 +17,8 @@ function calculateRms(pcm16Buffer) {
     return Math.sqrt(sumSquares / samples);
 }
 
-// Un VAD independiente por canal de audio. El estado vive en el closure, no en el módulo,
-// para que el canal del sistema y el del micrófono no se pisen (ver D6).
+// One independent VAD per audio channel. State lives in the closure rather than in
+// the module so the system channel and the microphone cannot trample each other (D6).
 function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2, onSpeechEnd } = {}) {
     if (typeof onSpeechEnd !== 'function') {
         throw new TypeError('createVad requires an onSpeechEnd callback');
@@ -49,8 +49,9 @@ function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2,
 
             if (!isSpeaking && speechFrameCount >= mode.speechFramesRequired) {
                 isSpeaking = true;
-                // Arrancamos el segmento con el pre-roll: el ataque de la frase suele
-                // caer por debajo del umbral y es justo lo que más se pierde con acento.
+                // Start the segment with the pre-roll: the attack of a phrase usually
+                // falls below the threshold, and that is exactly what a strong accent
+                // loses most often.
                 speechBuffers = preRoll.slice();
                 preRoll = [];
             }
@@ -60,9 +61,9 @@ function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2,
 
             if (isSpeaking && silenceFrameCount >= mode.silenceFramesRequired) {
                 isSpeaking = false;
-                // Recortamos el silencio final que disparó el cierre y dejamos solo una
-                // cola corta. Mandar 3 s de silencio a Whisper malgasta proceso y es
-                // donde más alucina (B3); la cola evita cortar el final de la palabra.
+                // Trim the trailing silence that triggered the close, keeping a short
+                // tail. Sending 3s of silence to Whisper wastes compute and is where it
+                // hallucinates most (B3); the tail avoids clipping the final word.
                 const silencioAcumulado = silenceFrameCount - 1;
                 const aDescartar = Math.max(0, silencioAcumulado - tailFrames);
                 const utiles = aDescartar > 0 ? speechBuffers.slice(0, speechBuffers.length - aDescartar) : speechBuffers;

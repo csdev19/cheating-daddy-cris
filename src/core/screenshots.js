@@ -1,9 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Las capturas no caben en el hilo: el hilo se persiste como JSON y un jpeg en
-// base64 lo multiplicaría por sesión. Se guardan como archivo bajo la carpeta de
-// la sesión y el evento se queda con la ruta relativa (`imageRef`).
+// Screenshots do not belong in the thread: the thread is persisted as JSON and a
+// base64 jpeg would blow it up per session. They are written as files under the
+// session folder and the event keeps only the relative path (`imageRef`).
 
 function sessionDir(historyDir, sessionId) {
     return path.join(historyDir, String(sessionId));
@@ -20,8 +20,8 @@ function saveScreenshot({ historyDir, sessionId, t, base64 }) {
     return ref;
 }
 
-// La ref viene de un JSON en disco, así que se trata como entrada no confiable:
-// cualquier ruta que se salga del historial se descarta.
+// The ref comes from a JSON file on disk, so it is treated as untrusted input:
+// any path that escapes the history folder is discarded.
 function resolveScreenshotPath(historyDir, ref) {
     if (!ref) return null;
 

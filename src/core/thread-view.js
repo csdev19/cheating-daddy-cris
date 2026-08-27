@@ -1,13 +1,13 @@
-// Proyecta el hilo de eventos a las filas que pinta la vista. Es el único sitio
-// donde se decide qué se agrupa y qué se adjunta; la vista solo recorre el
-// resultado. Al ser puro, `AssistantView` (sesión en curso) e `HistoryView`
-// (sesión guardada) pintan exactamente lo mismo a partir de los mismos eventos.
+// Projects the event thread into the rows the view paints. This is the only place
+// that decides what gets grouped and what gets attached; the view just walks the
+// result. Being pure, `AssistantView` (live session) and `HistoryView` (stored
+// session) render exactly the same thing from the same events.
 
-// Whisper emite un segmento por pausa del VAD, así que una frase hablada llega
-// troceada. Sin fusionar, la vista es una lista de fragmentos ilegibles.
+// Whisper emits one segment per VAD pause, so a single spoken sentence arrives in
+// pieces. Without merging, the view is an unreadable list of fragments.
 const DEFAULT_MERGE_WINDOW_MS = 8000;
 
-// Una captura y la pregunta que la usa son un solo gesto del usuario.
+// A screenshot and the question that uses it are one single user gesture.
 const DEFAULT_ATTACH_WINDOW_MS = 30000;
 
 function formatClock(t) {
@@ -20,7 +20,7 @@ function projectThread(events, { mergeWindowMs = DEFAULT_MERGE_WINDOW_MS, attach
 
     const ordered = events.slice().sort((a, b) => a.t - b.t);
     const rows = [];
-    // Índice en `rows` de la última captura aún sin pregunta que la reclame.
+    // Index in `rows` of the last screenshot no question has claimed yet.
     let pendingScreenRow = -1;
 
     for (let i = 0; i < ordered.length; i++) {
@@ -51,7 +51,7 @@ function projectThread(events, { mergeWindowMs = DEFAULT_MERGE_WINDOW_MS, attach
 
         if (event.kind === 'ask') {
             const claimed = pendingScreenRow >= 0 && event.t - rows[pendingScreenRow].t <= attachWindowMs ? rows[pendingScreenRow] : null;
-            // La captura se consume: no puede adjuntarse también a la pregunta siguiente.
+            // The screenshot is consumed: it cannot also attach to the next question.
             if (claimed) rows.splice(pendingScreenRow, 1);
             pendingScreenRow = -1;
 
@@ -77,8 +77,8 @@ function projectThread(events, { mergeWindowMs = DEFAULT_MERGE_WINDOW_MS, attach
 
 const api = { projectThread, formatClock, DEFAULT_MERGE_WINDOW_MS, DEFAULT_ATTACH_WINDOW_MS };
 
-// Node (main process y tests) lo consume como CommonJS; el renderer lo carga como
-// script clásico y lo lee desde `window`, que es como las vistas Lit (ES modules)
-// pueden usar un módulo de `src/core/` sin build step.
+// Node (main process and tests) consumes it as CommonJS; the renderer loads it as a
+// classic script and reads it off `window`, which is how the Lit views (ES modules)
+// can use a `src/core/` module with no build step.
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 if (typeof window !== 'undefined') window.threadView = api;
