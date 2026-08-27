@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseFrontmatter, listProfiles, loadProfile, getProfilesDir } = require('../src/core/profiles');
+const { parseFrontmatter, listProfiles, describeProfiles, resolveProfileName, loadProfile, getProfilesDir } = require('../src/core/profiles');
 
 function crearPerfilDePrueba() {
     const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'perfiles-'));
@@ -48,7 +48,55 @@ test('parseFrontmatter convierte booleanos pero deja el resto como texto', () =>
 test('listProfiles devuelve las carpetas ordenadas', () => {
     const raiz = crearPerfilDePrueba();
     fs.mkdirSync(path.join(raiz, 'aaa-primero'));
+    fs.writeFileSync(path.join(raiz, 'aaa-primero', 'profile.md'), '---\nname: Primero\n---\n\nHola.');
     assert.deepStrictEqual(listProfiles(raiz), ['aaa-primero', 'entrevista-backend']);
+});
+
+// Una carpeta suelta sin profile.md no es un perfil. Si el selector la ofrece,
+// elegirla revienta la sesión al arrancar.
+test('listProfiles ignora carpetas sin profile.md', () => {
+    const raiz = crearPerfilDePrueba();
+    fs.mkdirSync(path.join(raiz, 'a-medias'));
+
+    assert.deepStrictEqual(listProfiles(raiz), ['entrevista-backend']);
+});
+
+test('describeProfiles da carpeta y nombre visible de cada perfil', () => {
+    const raiz = crearPerfilDePrueba();
+
+    assert.deepStrictEqual(describeProfiles(raiz), [{ dir: 'entrevista-backend', name: 'Entrevista Backend' }]);
+});
+
+test('describeProfiles usa el nombre de la carpeta si falta en el frontmatter', () => {
+    const raiz = crearPerfilDePrueba();
+    fs.mkdirSync(path.join(raiz, 'sin-nombre'));
+    fs.writeFileSync(path.join(raiz, 'sin-nombre', 'profile.md'), 'Sin frontmatter.');
+
+    assert.deepStrictEqual(describeProfiles(raiz), [
+        { dir: 'entrevista-backend', name: 'Entrevista Backend' },
+        { dir: 'sin-nombre', name: 'sin-nombre' },
+    ]);
+});
+
+test('resolveProfileName respeta el perfil pedido si existe', () => {
+    const raiz = crearPerfilDePrueba();
+
+    assert.strictEqual(resolveProfileName(raiz, 'entrevista-backend'), 'entrevista-backend');
+});
+
+// El perfil guardado en preferencias puede haber sido renombrado o borrado a mano.
+// Sin este respaldo, la app se queda sin arrancar y sin forma de recuperarse.
+test('resolveProfileName cae al primer perfil disponible si el pedido no existe', () => {
+    const raiz = crearPerfilDePrueba();
+
+    assert.strictEqual(resolveProfileName(raiz, 'no-existe'), 'entrevista-backend');
+    assert.strictEqual(resolveProfileName(raiz, null), 'entrevista-backend');
+});
+
+test('resolveProfileName devuelve null si no hay ningún perfil', () => {
+    const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'vacio-'));
+
+    assert.strictEqual(resolveProfileName(raiz, 'interview'), null);
 });
 
 test('listProfiles devuelve vacío si el directorio no existe', () => {

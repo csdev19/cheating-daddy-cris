@@ -45,13 +45,33 @@ function parseFrontmatter(raw) {
     return { meta, body };
 }
 
+// Un perfil es una carpeta con profile.md. Cualquier otra cosa no se ofrece:
+// si el selector la lista, elegirla revienta la sesión al arrancar.
 function listProfiles(profilesDir) {
     if (!fs.existsSync(profilesDir)) return [];
     return fs
         .readdirSync(profilesDir, { withFileTypes: true })
         .filter(e => e.isDirectory())
         .map(e => e.name)
+        .filter(name => fs.existsSync(path.join(profilesDir, name, 'profile.md')))
         .sort();
+}
+
+// Lo que necesita el selector: la carpeta (el id real) y el nombre que se enseña.
+// Al salir de disco, la lista no puede quedar desincronizada de lo que existe.
+function describeProfiles(profilesDir) {
+    return listProfiles(profilesDir).map(dir => {
+        const { meta } = parseFrontmatter(fs.readFileSync(path.join(profilesDir, dir, 'profile.md'), 'utf8'));
+        return { dir, name: meta.name || dir };
+    });
+}
+
+// El perfil guardado en preferencias puede haberse renombrado o borrado a mano.
+// Sin este respaldo la app se queda sin arrancar y sin forma de recuperarse.
+function resolveProfileName(profilesDir, preferred) {
+    const available = listProfiles(profilesDir);
+    if (available.length === 0) return null;
+    return available.includes(preferred) ? preferred : available[0];
 }
 
 function slugify(text) {
@@ -94,7 +114,7 @@ function loadProfile(profilesDir, name) {
     const profileFile = path.join(profileDir, 'profile.md');
 
     if (!fs.existsSync(profileFile)) {
-        throw new Error(`El perfil '${name}' no tiene profile.md en ${profileDir}`);
+        throw new Error(`Profile '${name}' has no profile.md in ${profileDir}`);
     }
 
     const { meta, body } = parseFrontmatter(fs.readFileSync(profileFile, 'utf8'));
@@ -112,4 +132,4 @@ function loadProfile(profilesDir, name) {
     };
 }
 
-module.exports = { getProfilesDir, parseFrontmatter, listProfiles, loadProfile, slugify };
+module.exports = { getProfilesDir, parseFrontmatter, listProfiles, describeProfiles, resolveProfileName, loadProfile, slugify };

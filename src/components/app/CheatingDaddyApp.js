@@ -33,11 +33,64 @@ export class CheatingDaddyApp extends LitElement {
 
         .app-shell {
             display: flex;
+            position: relative;
             height: calc(100vh - 2px);
             margin: 1px;
             overflow: hidden;
             border: 2px solid rgba(255, 255, 255, 0.18);
             border-radius: 11px;
+        }
+
+        /* Errors used to die in the console on a view with nowhere to show them. */
+        .toast {
+            position: absolute;
+            bottom: var(--space-md);
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            max-width: min(560px, calc(100% - 2 * var(--space-lg)));
+            display: flex;
+            align-items: flex-start;
+            gap: var(--space-sm);
+            padding: var(--space-sm) var(--space-md);
+            background: var(--bg-elevated);
+            border: 1px solid var(--danger);
+            border-radius: var(--radius-md);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+            animation: toast-in 0.18s ease-out;
+        }
+
+        @keyframes toast-in {
+            from {
+                opacity: 0;
+                transform: translate(-50%, 8px);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+
+        .toast-text {
+            flex: 1;
+            color: var(--text-primary);
+            font-size: var(--font-size-sm);
+            line-height: 1.4;
+            user-select: text;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0 2px;
+        }
+
+        .toast-close:hover {
+            color: var(--text-primary);
         }
 
         .top-drag-bar {
@@ -375,15 +428,17 @@ export class CheatingDaddyApp extends LitElement {
         sessionActive: { type: Boolean },
         selectedProfile: { type: String },
         selectedLanguage: { type: String },
-        responses: { type: Array },
-        currentResponseIndex: { type: Number },
+        threadEvents: { type: Array },
+        availableProfiles: { type: Array },
+        toast: { state: true },
         selectedScreenshotInterval: { type: String },
         selectedImageQuality: { type: String },
         layoutMode: { type: String },
         _viewInstances: { type: Object, state: true },
         _isClickThrough: { state: true },
-        _awaitingNewResponse: { state: true },
-        shouldAnimateResponse: { type: Boolean },
+        pendingAsk: { state: true },
+        streamingAnswer: { state: true },
+        notices: { state: true },
         _storageLoaded: { state: true },
         _updateAvailable: { state: true },
         _whisperDownloading: { state: true },
@@ -402,13 +457,14 @@ export class CheatingDaddyApp extends LitElement {
         this.selectedScreenshotInterval = '5';
         this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
-        this.responses = [];
-        this.currentResponseIndex = -1;
+        this.threadEvents = [];
+        this.availableProfiles = [];
+        this.toast = null;
+        this.pendingAsk = null;
+        this.streamingAnswer = '';
+        this.notices = [];
         this._viewInstances = new Map();
         this._isClickThrough = false;
-        this._awaitingNewResponse = false;
-        this._currentResponseIsComplete = true;
-        this.shouldAnimateResponse = false;
         this._storageLoaded = false;
         this._timerInterval = null;
         this._updateAvailable = false;
@@ -468,19 +524,48 @@ export class CheatingDaddyApp extends LitElement {
 
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            ipcRenderer.on('new-response', (_, response) => this.addNewResponse(response));
-            ipcRenderer.on('update-response', (_, response) => this.updateCurrentResponse(response));
+            // El hilo del main es la fuente de verdad; la vista solo lo proyecta.
+            ipcRenderer.on('thread-snapshot', (_, { events }) => {
+                this.threadEvents = events || [];
+                this.pendingAsk = null;
+                this.streamingAnswer = '';
+            });
+            ipcRenderer.on('thread-event', (_, event) => this.appendThreadEvent(event));
+            ipcRenderer.on('ask-started', (_, ask) => {
+                this.pendingAsk = ask;
+                this.streamingAnswer = '';
+            });
+            ipcRenderer.on('ask-failed', (_, { error }) => {
+                this.pendingAsk = this.pendingAsk ? { ...this.pendingAsk, error } : null;
+                this.streamingAnswer = '';
+            });
+            // La respuesta llega troceada; se pinta en la fila pendiente hasta que
+            // el evento `ask` del hilo la sustituye ya completa.
+            ipcRenderer.on('new-response', (_, response) => {
+                this.streamingAnswer = response;
+            });
+            ipcRenderer.on('update-response', (_, response) => {
+                this.streamingAnswer = response;
+            });
             ipcRenderer.on('update-status', (_, status) => this.setStatus(status));
             ipcRenderer.on('click-through-toggled', (_, isEnabled) => {
                 this._isClickThrough = isEnabled;
             });
-            ipcRenderer.on('reconnect-failed', (_, data) => this.addNewResponse(data.message));
+            ipcRenderer.on('reconnect-failed', (_, data) => this.addNotice(data.message));
             ipcRenderer.on('whisper-downloading', (_, downloading) => {
                 this._whisperDownloading = downloading;
             });
             ipcRenderer.on('local-ai-download-progress', (_, progress) => {
                 this._localAiDownloadProgress = progress;
             });
+
+            // La vista puede remontarse a mitad de sesión (al volver del historial,
+            // por ejemplo) y entonces se ha perdido todo lo emitido hasta ahora.
+            ipcRenderer.invoke('get-thread').then(({ events }) => {
+                if (events && events.length) this.threadEvents = events;
+            });
+
+            this.loadProfiles();
         }
     }
 
@@ -530,28 +615,43 @@ export class CheatingDaddyApp extends LitElement {
 
     setStatus(text) {
         this.statusText = text;
-        if (text.includes('Ready') || text.includes('Listening') || text.includes('Error')) {
-            this._currentResponseIsComplete = true;
+    }
+
+    async loadProfiles() {
+        this.availableProfiles = await cheatingDaddy.listProfiles();
+
+        // The stored profile may name a folder that is gone. Falling back keeps the
+        // picker honest instead of offering something that cannot be loaded.
+        const exists = this.availableProfiles.some(p => p.dir === this.selectedProfile);
+        if (!exists && this.availableProfiles.length > 0) {
+            this.handleProfileChange(this.availableProfiles[0].dir);
         }
     }
 
-    addNewResponse(response) {
-        const wasOnLatest = this.currentResponseIndex === this.responses.length - 1;
-        this.responses = [...this.responses, response];
-        if (wasOnLatest || this.currentResponseIndex === -1) {
-            this.currentResponseIndex = this.responses.length - 1;
-        }
-        this._awaitingNewResponse = false;
-        this.requestUpdate();
+    // Errors during start happen on a view with no room for them, so they get a
+    // toast instead of dying in the console.
+    showToast(message) {
+        this.toast = message;
+        clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => {
+            this.toast = null;
+        }, 6000);
     }
 
-    updateCurrentResponse(response) {
-        if (this.responses.length > 0) {
-            this.responses = [...this.responses.slice(0, -1), response];
-        } else {
-            this.addNewResponse(response);
+    appendThreadEvent(event) {
+        this.threadEvents = [...this.threadEvents, event];
+        // El evento `ask` ya trae la respuesta completa: la fila pendiente sobra.
+        if (event.kind === 'ask') {
+            this.pendingAsk = null;
+            this.streamingAnswer = '';
         }
-        this.requestUpdate();
+    }
+
+    // Errores que no son parte de la conversación (red, permisos) pero que el
+    // usuario tiene que ver sin salir de la vista.
+    addNotice(text) {
+        this.notices = [...this.notices, { t: Date.now(), text }];
+        this.showToast(text);
     }
 
     // ── Navigation ──
@@ -596,52 +696,33 @@ export class CheatingDaddyApp extends LitElement {
     // ── Session start ──
 
     async handleStart() {
-        const prefs = await cheatingDaddy.storage.getPreferences();
-        const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
+        // El main resuelve transcripción y razonamiento a partir del perfil y las
+        // preferencias (D14); aquí solo se dice con qué perfil se empieza.
+        const result = await cheatingDaddy.initializeSession(this.selectedProfile);
 
-        if (providerMode === 'cloud') {
-            const creds = await cheatingDaddy.storage.getCredentials();
-            if (!creds.cloudToken || creds.cloudToken.trim() === '') {
+        if (!result.success) {
+            if (result.error === 'missing-api-key') {
                 const mainView = this.shadowRoot.querySelector('main-view');
                 if (mainView && mainView.triggerApiKeyError) {
                     mainView.triggerApiKeyError();
                 }
-                return;
+            } else {
+                this.showToast(result.error);
             }
+            return;
+        }
 
-            const success = await cheatingDaddy.initializeCloud(this.selectedProfile);
-            if (!success) {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-        } else if (providerMode === 'local') {
-            const success = await cheatingDaddy.initializeLocal(this.selectedProfile);
-            if (!success) {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-        } else {
-            const apiKey = await cheatingDaddy.storage.getApiKey();
-            if (!apiKey || apiKey === '') {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-
-            await cheatingDaddy.initializeGemini(this.selectedProfile, this.selectedLanguage);
+        // The main process may have fallen back to another profile; keep the UI honest.
+        if (result.profile && result.profile !== this.selectedProfile) {
+            this.handleProfileChange(result.profile);
         }
 
         cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
-        this.responses = [];
-        this.currentResponseIndex = -1;
+        this.threadEvents = [];
+        this.availableProfiles = [];
+        this.toast = null;
+        this.pendingAsk = null;
+        this.streamingAnswer = '';
         this.startTime = Date.now();
         this.sessionActive = true;
         this.currentView = 'assistant';
@@ -707,14 +788,7 @@ export class CheatingDaddyApp extends LitElement {
             this.setStatus('Error sending message: ' + result.error);
         } else {
             this.setStatus('Message sent...');
-            this._awaitingNewResponse = true;
         }
-    }
-
-    handleResponseIndexChanged(e) {
-        this.currentResponseIndex = e.detail.index;
-        this.shouldAnimateResponse = false;
-        this.requestUpdate();
     }
 
     handleOnboardingComplete() {
@@ -762,6 +836,7 @@ export class CheatingDaddyApp extends LitElement {
                 return html`
                     <ai-customize-view
                         .selectedProfile=${this.selectedProfile}
+                        .availableProfiles=${this.availableProfiles}
                         .onProfileChange=${p => this.handleProfileChange(p)}
                     ></ai-customize-view>
                 `;
@@ -770,6 +845,7 @@ export class CheatingDaddyApp extends LitElement {
                 return html`
                     <customize-view
                         .selectedProfile=${this.selectedProfile}
+                        .availableProfiles=${this.availableProfiles}
                         .selectedLanguage=${this.selectedLanguage}
                         .selectedScreenshotInterval=${this.selectedScreenshotInterval}
                         .selectedImageQuality=${this.selectedImageQuality}
@@ -794,17 +870,12 @@ export class CheatingDaddyApp extends LitElement {
             case 'assistant':
                 return html`
                     <assistant-view
-                        .responses=${this.responses}
-                        .currentResponseIndex=${this.currentResponseIndex}
+                        .events=${this.threadEvents}
+                        .pendingAsk=${this.pendingAsk}
+                        .streamingAnswer=${this.streamingAnswer}
+                        .notices=${this.notices}
                         .selectedProfile=${this.selectedProfile}
                         .onSendText=${msg => this.handleSendText(msg)}
-                        .shouldAnimateResponse=${this.shouldAnimateResponse}
-                        @response-index-changed=${this.handleResponseIndexChanged}
-                        @response-animation-complete=${() => {
-                            this.shouldAnimateResponse = false;
-                            this._currentResponseIsComplete = true;
-                            this.requestUpdate();
-                        }}
                     ></assistant-view>
                 `;
 
@@ -989,6 +1060,14 @@ export class CheatingDaddyApp extends LitElement {
                     ${isLive ? this.renderLiveBar() : ''}
                     <div class="content-inner ${isLive ? 'live' : ''}">${this.renderCurrentView()}</div>
                 </div>
+                ${
+                    this.toast
+                        ? html`<div class="toast" role="alert">
+                              <span class="toast-text">${this.toast}</span>
+                              <button class="toast-close" @click=${() => (this.toast = null)} title="Dismiss">×</button>
+                          </div>`
+                        : ''
+                }
             </div>
         `;
     }

@@ -19,17 +19,26 @@ app.whenReady().then(async () => {
     // Initialize storage (checks version, resets if needed)
     storage.initializeStorage();
 
-    // Los perfiles viven en disco como carpetas de markdown (D7). En el primer
-    // arranque se generan desde las plantillas y se conserva el customPrompt viejo.
+    // Profiles live on disk as markdown folders (D7). On first launch they are
+    // generated from the templates, keeping the old customPrompt as context.
     try {
         const { bootstrapProfiles } = require('./core/profiles-bootstrap');
+        const { getProfilesDir, resolveProfileName } = require('./core/profiles');
         const prefs = storage.getPreferences();
-        const creados = bootstrapProfiles({ configDir: storage.getConfigDir(), legacyCustomPrompt: prefs.customPrompt });
-        if (creados.length > 0) {
-            console.log('Perfiles creados:', creados.join(', '));
+        const created = bootstrapProfiles({ configDir: storage.getConfigDir(), legacyCustomPrompt: prefs.customPrompt });
+        if (created.length > 0) {
+            console.log('Created profiles:', created.join(', '));
+        }
+
+        // The stored profile may name a folder that no longer exists (renamed or
+        // deleted by hand). Repairing it here means the app can always start.
+        const resolved = resolveProfileName(getProfilesDir(storage.getConfigDir()), prefs.selectedProfile);
+        if (resolved && resolved !== prefs.selectedProfile) {
+            console.log(`Profile '${prefs.selectedProfile}' is missing; falling back to '${resolved}'`);
+            storage.updatePreference('selectedProfile', resolved);
         }
     } catch (error) {
-        console.error('No se pudieron crear los perfiles por defecto:', error);
+        console.error('Could not prepare the default profiles:', error);
     }
 
     // Trigger screen recording permission prompt on macOS if not already granted
@@ -152,6 +161,18 @@ function setupStorageIpcHandlers() {
     });
 
     // ============ PREFERENCES ============
+    // The profile picker reads from disk: a hardcoded list drifts from what
+    // actually exists, and picking a missing profile breaks the session.
+    ipcMain.handle('list-profiles', async () => {
+        try {
+            const { getProfilesDir, describeProfiles } = require('./core/profiles');
+            return { success: true, data: describeProfiles(getProfilesDir(storage.getConfigDir())) };
+        } catch (error) {
+            console.error('Error listing profiles:', error);
+            return { success: false, error: error.message, data: [] };
+        }
+    });
+
     ipcMain.handle('storage:get-preferences', async () => {
         try {
             return { success: true, data: storage.getPreferences() };

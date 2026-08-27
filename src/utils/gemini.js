@@ -7,7 +7,10 @@ const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud,
 const { startTransportLog, logTransportEvent, closeTransportLog } = require('./transportLogger');
 const { createSessionManager } = require('../core/session');
 const { resolveModes } = require('../core/modes');
-const { getPreferences, getConfigDir } = require('../storage');
+const { getProfilesDir, resolveProfileName } = require('../core/profiles');
+const { getPreferences, getConfigDir, getHistoryDir, saveSession } = require('../storage');
+const { saveScreenshot, resolveScreenshotPath } = require('../core/screenshots');
+const { projectThread } = require('../core/thread-view');
 
 // Lazy-loaded to avoid circular dependency (localai.js imports from gemini.js)
 let _localai = null;
@@ -65,14 +68,14 @@ const RECONNECT_DELAY = 2000;
 // y sin variar durante la reunión: es el prefijo que se cachea.
 async function sendPayloadToGemini(payload) {
     const apiKey = getApiKey();
-    if (!apiKey) throw new Error('Falta la API key de Gemini');
+    if (!apiKey) throw new Error('Missing Gemini API key');
 
     const model = payload.model || getConfig().geminiLiveModel || 'gemini-2.5-flash';
     const client = new GoogleGenAI({ apiKey });
 
     const parts = [];
     if (payload.transcript) {
-        parts.push({ text: `Conversación hasta ahora:\n\n${payload.transcript}` });
+        parts.push({ text: `Conversation so far:\n\n${payload.transcript}` });
     }
     if (payload.image) {
         parts.push({ inlineData: { mimeType: payload.image.mimeType, data: payload.image.data } });
@@ -108,15 +111,52 @@ async function sendPayloadToGemini(payload) {
     return fullText.trim();
 }
 
+// El hilo se guarda con un respiro: durante una reunión entra un evento de voz
+// cada pocos segundos y no hace falta reescribir el JSON en cada uno.
+const THREAD_SAVE_DEBOUNCE_MS = 1000;
+let threadSaveTimer = null;
+
+function persistThread() {
+    const ctx = sessionManager.getContext();
+    if (!ctx) return;
+    const { sessionId, profileName, events } = ctx.toJSON();
+    try {
+        saveSession(sessionId, { profile: profileName, events });
+    } catch (error) {
+        console.error('Could not save the session thread:', error);
+    }
+}
+
+function scheduleThreadSave() {
+    if (threadSaveTimer) clearTimeout(threadSaveTimer);
+    threadSaveTimer = setTimeout(() => {
+        threadSaveTimer = null;
+        persistThread();
+    }, THREAD_SAVE_DEBOUNCE_MS);
+}
+
+function flushThreadSave() {
+    if (threadSaveTimer) {
+        clearTimeout(threadSaveTimer);
+        threadSaveTimer = null;
+    }
+    persistThread();
+}
+
 const sessionManager = createSessionManager({
     configDir: getConfigDir(),
+    // La vista es una proyección del hilo: cada evento que entra se le manda tal cual.
+    onEvent: event => {
+        sendToRenderer('thread-event', event);
+        scheduleThreadSave();
+    },
     // El adaptador de proveedor vive aquí: es lo único que sabe de Gemini.
     // Aplica D13: un perfil confidencial nunca sale de la máquina, aunque el modo
     // activo sea de nube. Prefiere una respuesta peor a una fuga.
     sendToProvider: async payload => {
         if (payload.confidential) {
             if (!getLocalAi().isReasoningActive()) {
-                throw new Error('Este perfil es confidencial y requiere el razonamiento local activo');
+                throw new Error('This profile is confidential and needs local reasoning running');
             }
             return getLocalAi().sendLocalPayload(payload);
         }
@@ -139,10 +179,9 @@ async function generateSessionDigest() {
 
     try {
         const { buildDigestPrompt, appendDigest } = require('../core/digest');
-        const { getProfilesDir } = require('../core/profiles');
 
         const digestPayload = {
-            system: 'Eres un asistente que resume reuniones con precisión y sin inventar.',
+            system: 'You summarise meetings accurately and never invent detail.',
             transcript: '',
             question: buildDigestPrompt(transcript),
             image: null,
@@ -162,9 +201,21 @@ async function generateSessionDigest() {
             sendToRenderer('save-session-digest', { sessionId: ctx.toJSON().sessionId, digest });
         }
     } catch (error) {
-        console.error('No se pudo generar el resumen de la sesión:', error);
+        console.error('Could not generate the session summary:', error);
     } finally {
         sessionManager.end();
+    }
+}
+
+// La respuesta tarda segundos: la vista pinta la pregunta en cuanto sale, y la
+// sustituye por el evento real del hilo cuando llega (B5).
+async function runAsk({ question, image = null, imageRef = null }) {
+    sendToRenderer('ask-started', { question, imageRef, t: Date.now() });
+    try {
+        return await sessionManager.ask({ question, image });
+    } catch (error) {
+        sendToRenderer('ask-failed', { question, error: error.message });
+        throw error;
     }
 }
 
@@ -193,7 +244,10 @@ function buildContextMessage() {
 
 // Conversation management functions
 function initializeNewSession(profile = null, customPrompt = null) {
-    currentSessionId = Date.now().toString();
+    // Si ya hay un hilo abierto, el id lo manda el gestor de sesión: si no, las
+    // miniaturas y el JSON del hilo acabarían bajo dos sesiones distintas.
+    const active = sessionManager.getContext();
+    currentSessionId = active ? active.toJSON().sessionId : Date.now().toString();
     startTransportLog(currentSessionId);
     currentTranscription = '';
     groqRequestStartedForTurn = false;
@@ -1168,16 +1222,33 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     // La transcripción local alimenta el hilo; no invoca al modelo (D1).
     getLocalAi().setTranscriptionHandler((speaker, text) => {
         sessionManager.recordSpeech(speaker, text);
-        sendToRenderer('transcription', { speaker, text });
     });
 
     // Punto de entrada único de sesión: decide qué arrancar según los dos ejes (D14).
     ipcMain.handle('initialize-session', async (event, { profileName }) => {
         try {
             const prefs = getPreferences();
-            const { profile } = sessionManager.start({ profileName });
+
+            // Last line of defence: this is the only place that can see the disk at
+            // the moment the session starts. A stale name in preferences or in the
+            // picker must not be able to stop the app from running.
+            const resolved = resolveProfileName(getProfilesDir(getConfigDir()), profileName);
+            if (!resolved) throw new Error('No profiles found. Add one under the profiles folder and try again.');
+
+            const { profile, sessionId } = sessionManager.start({ profileName: resolved });
             const modes = resolveModes(prefs, profile.meta);
             currentProviderMode = modes.reasoning === 'local-llama' ? 'local' : 'byok';
+
+            // Sin clave el fallo aparecería más tarde, al preguntar, con la reunión
+            // ya empezada. Mejor negarse aquí y que la UI pida la clave.
+            if (modes.reasoning !== 'local-llama' && !getApiKey()) {
+                throw new Error('missing-api-key');
+            }
+
+            currentSessionId = sessionId;
+            startTransportLog(sessionId);
+            saveSession(sessionId, { profile: resolved, events: [] });
+            sendToRenderer('thread-snapshot', { sessionId, events: [] });
 
             sendToRenderer('session-initializing', true);
 
@@ -1192,11 +1263,11 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
             }
 
             sendToRenderer('session-initializing', false);
-            sendToRenderer('update-status', 'Listo - escuchando...');
-            console.log('[Sesión] iniciada:', profileName, modes);
-            return { success: true, modes };
+            sendToRenderer('update-status', 'Ready - listening');
+            console.log('[Session] started:', resolved, modes);
+            return { success: true, modes, profile: resolved };
         } catch (error) {
-            console.error('Error iniciando sesión:', error);
+            console.error('Error starting session:', error);
             sessionManager.end();
             sendToRenderer('session-initializing', false);
             return { success: false, error: error.message };
@@ -1205,44 +1276,6 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 
     // Store the geminiSessionRef globally for reconnection access
     global.geminiSessionRef = geminiSessionRef;
-
-    ipcMain.handle('initialize-cloud', async (event, token, profile, userContext) => {
-        try {
-            currentProviderMode = 'cloud';
-            initializeNewSession(profile);
-            setOnTurnComplete((transcription, response) => {
-                saveConversationTurn(transcription, response);
-            });
-            sendToRenderer('session-initializing', true);
-            await connectCloud(token, profile, userContext);
-            sendToRenderer('session-initializing', false);
-            return true;
-        } catch (err) {
-            console.error('[Cloud] Init error:', err);
-            currentProviderMode = 'byok';
-            sendToRenderer('session-initializing', false);
-            return false;
-        }
-    });
-
-    ipcMain.handle('initialize-gemini', async (event, apiKey, customPrompt, profile = 'interview', language = 'en-US') => {
-        currentProviderMode = 'byok';
-        const session = await initializeGeminiSession(apiKey, customPrompt, profile, language);
-        if (session) {
-            geminiSessionRef.current = session;
-            return true;
-        }
-        return false;
-    });
-
-    ipcMain.handle('initialize-local', async (event, localLlmModel, whisperModel, profile, customPrompt) => {
-        currentProviderMode = 'local';
-        const success = await getLocalAi().initializeLocalSession(localLlmModel, whisperModel, profile, customPrompt);
-        if (!success) {
-            currentProviderMode = 'byok';
-        }
-        return success;
-    });
 
     ipcMain.handle('cancel-local-initialization', async () => {
         const cancelled = await getLocalAi().cancelLocalInitialization();
@@ -1321,20 +1354,38 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
     });
 
-    ipcMain.handle('send-image-content', async (event, { data, prompt }) => {
+    ipcMain.handle('send-image-content', async (event, { data, prompt, thumbnail }) => {
         try {
             if (!data || typeof data !== 'string') {
-                return { success: false, error: 'Datos de imagen inválidos' };
+                return { success: false, error: 'Invalid image data' };
             }
 
             const buffer = Buffer.from(data, 'base64');
             if (buffer.length < 1000) {
-                return { success: false, error: 'Imagen demasiado pequeña' };
+                return { success: false, error: 'Image too small' };
             }
 
-            const answer = await sessionManager.ask({
-                question: prompt || 'Ayúdame con lo que estoy viendo y con la conversación hasta ahora.',
+            // La imagen que ve el modelo es grande; al hilo va solo la miniatura,
+            // para que luego puedas ver qué estaba mirando cuando respondió.
+            let imageRef = null;
+            if (currentSessionId) {
+                try {
+                    imageRef = saveScreenshot({
+                        historyDir: getHistoryDir(),
+                        sessionId: currentSessionId,
+                        t: Date.now(),
+                        base64: thumbnail || data,
+                    });
+                    if (imageRef) sessionManager.recordScreen(imageRef);
+                } catch (error) {
+                    console.error('Could not save the thumbnail:', error);
+                }
+            }
+
+            const answer = await runAsk({
+                question: prompt || 'Help me with what I am looking at and the conversation so far.',
                 image: { data, mimeType: 'image/jpeg' },
+                imageRef,
             });
 
             return { success: true, text: answer };
@@ -1346,10 +1397,10 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 
     ipcMain.handle('send-text-message', async (event, text) => {
         if (!text || typeof text !== 'string' || text.trim().length === 0) {
-            return { success: false, error: 'Mensaje vacío' };
+            return { success: false, error: 'Empty message' };
         }
         try {
-            const answer = await sessionManager.ask({ question: text.trim() });
+            const answer = await runAsk({ question: text.trim() });
             return { success: true, text: answer };
         } catch (error) {
             console.error('Error en pregunta por texto:', error);
@@ -1357,9 +1408,60 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
     });
 
+    // Se perdieron por accidente al introducir el gestor de sesión (c908ffe). Sin
+    // ellos no hay audio de sistema en macOS, es decir: no existe el canal 'them'.
+    ipcMain.handle('start-macos-audio', async () => {
+        if (process.platform !== 'darwin') {
+            return { success: false, error: 'System audio capture is only available on macOS' };
+        }
+        try {
+            const success = await startMacOSAudioCapture(geminiSessionRef);
+            return { success };
+        } catch (error) {
+            console.error('Error starting macOS audio capture:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('stop-macos-audio', async () => {
+        try {
+            stopMacOSAudioCapture();
+            return { success: true };
+        } catch (error) {
+            console.error('Error stopping macOS audio capture:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // La vista pide la miniatura por su ref; el binario nunca viaja dentro del hilo.
+    ipcMain.handle('read-screenshot', async (event, ref) => {
+        try {
+            const file = resolveScreenshotPath(getHistoryDir(), ref);
+            if (!file) return null;
+            const fs = require('node:fs');
+            if (!fs.existsSync(file)) return null;
+            return `data:image/jpeg;base64,${fs.readFileSync(file).toString('base64')}`;
+        } catch (error) {
+            console.error('Could not read the thumbnail:', error);
+            return null;
+        }
+    });
+
+    // La vista puede montarse después de que empiece la sesión (o remontarse al
+    // volver del historial), así que necesita poder pedir el hilo entero.
+    ipcMain.handle('get-thread', async () => {
+        const ctx = sessionManager.getContext();
+        if (!ctx) return { sessionId: null, events: [] };
+        const { sessionId, events } = ctx.toJSON();
+        return { sessionId, events };
+    });
+
     ipcMain.handle('close-session', async event => {
         try {
             stopMacOSAudioCapture();
+            // El resumen cierra la sesión, así que el hilo se guarda antes de que
+            // se vacíe el contexto.
+            flushThreadSave();
             await generateSessionDigest();
 
             if (currentProviderMode === 'cloud') {

@@ -53,7 +53,7 @@ test('el transcript etiqueta a cada hablante', () => {
     ctx.addSpeech({ speaker: 'them', text: 'Hola' });
     ctx.addSpeech({ speaker: 'me', text: 'Buenas' });
 
-    assert.strictEqual(ctx.getTranscript(), '[Entrevistador]: Hola\n[Yo]: Buenas');
+    assert.strictEqual(ctx.getTranscript(), '[Them]: Hola\n[Me]: Buenas');
 });
 
 test('el transcript ignora eventos que no son voz', () => {
@@ -62,7 +62,7 @@ test('el transcript ignora eventos que no son voz', () => {
     ctx.addScreen({ imageRef: 'img-1' });
     ctx.addAsk({ question: '¿qué digo?', answer: 'esto' });
 
-    assert.strictEqual(ctx.getTranscript(), '[Entrevistador]: Hola');
+    assert.strictEqual(ctx.getTranscript(), '[Them]: Hola');
 });
 
 test('rechaza hablantes desconocidos', () => {
@@ -94,7 +94,7 @@ test('sobrevive a un round-trip por JSON', () => {
     ctx.addScreen({ imageRef: 'img-1', caption: 'un IDE' });
 
     const restaurado = fromJSON(JSON.parse(JSON.stringify(ctx.toJSON())));
-    assert.strictEqual(restaurado.getTranscript(), '[Entrevistador]: Hola');
+    assert.strictEqual(restaurado.getTranscript(), '[Them]: Hola');
     assert.strictEqual(restaurado.getEvents().length, 2);
     assert.strictEqual(restaurado.toJSON().sessionId, 's1');
 });

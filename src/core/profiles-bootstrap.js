@@ -2,36 +2,36 @@ const fs = require('fs');
 const path = require('path');
 const { getProfilesDir } = require('./profiles');
 
-// Sustituye a los profilePrompts hardcodeados, que ordenaban al modelo dictar
-// palabra por palabra ("no coaching, just the direct response"). Ese prompt era
-// lo contrario de un asistente de memoria (hallazgo H6).
-const INSTRUCCIONES_BASE = `Eres mi asistente de memoria, no un teleprompter. No me dictes qué decir.
+// Replaces the hardcoded profilePrompts, which told the model to dictate the
+// answer word by word ("no coaching, just the direct response"). That prompt was
+// the opposite of a memory assistant (finding H6).
+const BASE_INSTRUCTIONS = `You are my memory assistant, not a teleprompter. Do not tell me what to say.
 
-Cuando te invoco, dame lo que probablemente he olvidado: la cifra exacta, el nombre
-del proyecto, el término que acaban de usar. Sé breve — voy a leerte mientras hablo
-con alguien.
+When I call on you, give me what I have probably forgotten: the exact figure, the
+project name, the term they just used. Keep it short — I will be reading you while
+talking to someone.
 
-Si algo no está en mis notas, dilo. No lo inventes: prefiero un "no lo tengo" a un
-dato falso dicho con seguridad.`;
+If something is not in my notes, say so. Do not make it up: I would rather hear
+"I don't have that" than a confident falsehood.`;
 
-const PERFILES_POR_DEFECTO = [
+const DEFAULT_PROFILES = [
     {
-        dir: 'entrevista',
-        name: 'Entrevista de trabajo',
-        extra: 'Prioriza mi experiencia concreta y las cifras de impacto. Si mencionan una tecnología que está en mis notas, recuérdame qué hice con ella.',
-        checklist: ['Preguntar por el equipo y el día a día', 'Preguntar por el proceso de despliegue', 'Mencionar mi experiencia liderando'],
+        dir: 'interview',
+        name: 'Job Interview',
+        extra: 'Prioritise my concrete experience and impact figures. If they mention a technology that appears in my notes, remind me what I did with it.',
+        checklist: ['Ask about the team and the day to day', 'Ask about the deployment process', 'Mention my experience leading'],
     },
     {
-        dir: 'reunion',
-        name: 'Reunión de trabajo',
-        extra: 'Prioriza acuerdos previos y compromisos pendientes. Avísame si se repite algo ya cerrado.',
-        checklist: ['Confirmar los siguientes pasos', 'Anotar quién hace qué'],
+        dir: 'meeting',
+        name: 'Work Meeting',
+        extra: 'Prioritise earlier agreements and open commitments. Warn me if something already settled comes up again.',
+        checklist: ['Confirm the next steps', 'Note down who does what'],
     },
     {
-        dir: 'cliente',
-        name: 'Llamada con cliente',
-        extra: 'Prioriza el historial de la cuenta y lo prometido en llamadas anteriores.',
-        checklist: ['Confirmar plazos', 'Preguntar por bloqueos'],
+        dir: 'client-call',
+        name: 'Client Call',
+        extra: 'Prioritise the account history and whatever was promised on earlier calls.',
+        checklist: ['Confirm deadlines', 'Ask about blockers'],
     },
 ];
 
@@ -39,28 +39,28 @@ function bootstrapProfiles({ configDir, legacyCustomPrompt = '' }) {
     const profilesDir = getProfilesDir(configDir);
     fs.mkdirSync(profilesDir, { recursive: true });
 
-    const creados = [];
+    const created = [];
 
-    for (const plantilla of PERFILES_POR_DEFECTO) {
-        const dir = path.join(profilesDir, plantilla.dir);
+    for (const template of DEFAULT_PROFILES) {
+        const dir = path.join(profilesDir, template.dir);
         if (fs.existsSync(path.join(dir, 'profile.md'))) continue;
 
         fs.mkdirSync(path.join(dir, 'context'), { recursive: true });
 
-        const frontmatter = ['---', `name: ${plantilla.name}`, 'confidential: false', '---', ''].join('\n');
-        fs.writeFileSync(path.join(dir, 'profile.md'), `${frontmatter}\n${INSTRUCCIONES_BASE}\n\n${plantilla.extra}\n`);
-        fs.writeFileSync(path.join(dir, 'checklist.md'), plantilla.checklist.map(t => `- ${t}`).join('\n') + '\n');
+        const frontmatter = ['---', `name: ${template.name}`, 'confidential: false', '---', ''].join('\n');
+        fs.writeFileSync(path.join(dir, 'profile.md'), `${frontmatter}\n${BASE_INSTRUCTIONS}\n\n${template.extra}\n`);
+        fs.writeFileSync(path.join(dir, 'checklist.md'), template.checklist.map(t => `- ${t}`).join('\n') + '\n');
 
-        // Conservamos el contexto que el usuario ya tenía escrito en el textarea antiguo.
+        // Keeps whatever the user had already written in the old textarea.
         const legacy = (legacyCustomPrompt || '').trim();
         if (legacy) {
-            fs.writeFileSync(path.join(dir, 'context', 'migrado.md'), `${legacy}\n`);
+            fs.writeFileSync(path.join(dir, 'context', 'migrated.md'), `${legacy}\n`);
         }
 
-        creados.push(plantilla.dir);
+        created.push(template.dir);
     }
 
-    return creados;
+    return created;
 }
 
-module.exports = { bootstrapProfiles, INSTRUCCIONES_BASE, PERFILES_POR_DEFECTO };
+module.exports = { bootstrapProfiles, BASE_INSTRUCTIONS, DEFAULT_PROFILES };

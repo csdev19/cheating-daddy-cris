@@ -37,13 +37,15 @@ export class AICustomizeView extends LitElement {
 
     static properties = {
         selectedProfile: { type: String },
+        availableProfiles: { type: Array },
         onProfileChange: { type: Function },
         _context: { state: true },
     };
 
     constructor() {
         super();
-        this.selectedProfile = 'interview';
+        this.selectedProfile = null;
+        this.availableProfiles = [];
         this.onProfileChange = () => {};
         this._context = '';
         this._loadFromStorage();
@@ -68,27 +70,14 @@ export class AICustomizeView extends LitElement {
         await cheatingDaddy.storage.updatePreference('customPrompt', val);
     }
 
+    // Comes from disk (see list-profiles): profiles are folders the user can add,
+    // rename or delete, so a hardcoded list would go stale on first edit.
     _getProfileName(profile) {
-        const names = {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
-        };
-        return names[profile] || profile;
+        return (this.availableProfiles || []).find(p => p.dir === profile)?.name || profile;
     }
 
     render() {
-        const profiles = [
-            { value: 'interview', label: 'Job Interview' },
-            { value: 'sales', label: 'Sales Call' },
-            { value: 'meeting', label: 'Business Meeting' },
-            { value: 'presentation', label: 'Presentation' },
-            { value: 'negotiation', label: 'Negotiation' },
-            { value: 'exam', label: 'Exam Assistant' },
-        ];
+        const profiles = (this.availableProfiles || []).map(p => ({ value: p.dir, label: p.name }));
 
         return html`
             <div class="unified-page">

@@ -177,6 +177,7 @@ export class CustomizeView extends LitElement {
 
     static properties = {
         selectedProfile: { type: String },
+        availableProfiles: { type: Array },
         selectedLanguage: { type: String },
         selectedImageQuality: { type: String },
         layoutMode: { type: String },
@@ -197,7 +198,8 @@ export class CustomizeView extends LitElement {
 
     constructor() {
         super();
-        this.selectedProfile = 'interview';
+        this.selectedProfile = null;
+        this.availableProfiles = [];
         this.selectedLanguage = 'en-US';
         this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
@@ -243,15 +245,10 @@ export class CustomizeView extends LitElement {
         }
     }
 
+    // Comes from disk (see list-profiles): profiles are folders the user can add,
+    // rename or delete, so a hardcoded list would go stale on first edit.
     getProfiles() {
-        return [
-            { value: 'interview', name: 'Job Interview' },
-            { value: 'sales', name: 'Sales Call' },
-            { value: 'meeting', name: 'Business Meeting' },
-            { value: 'presentation', name: 'Presentation' },
-            { value: 'negotiation', name: 'Negotiation' },
-            { value: 'exam', name: 'Exam Assistant' },
-        ];
+        return (this.availableProfiles || []).map(p => ({ value: p.dir, name: p.name }));
     }
 
     getLanguages() {

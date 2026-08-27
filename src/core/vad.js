@@ -21,7 +21,7 @@ function calculateRms(pcm16Buffer) {
 // para que el canal del sistema y el del micrófono no se pisen (ver D6).
 function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2, onSpeechEnd } = {}) {
     if (typeof onSpeechEnd !== 'function') {
-        throw new TypeError('createVad requiere un callback onSpeechEnd');
+        throw new TypeError('createVad requires an onSpeechEnd callback');
     }
 
     let isSpeaking = false;

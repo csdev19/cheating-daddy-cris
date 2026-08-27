@@ -293,7 +293,7 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
                     try {
                         require('./gemini').endSessionForEmergency();
                     } catch (error) {
-                        console.error('No se pudo limpiar la sesión en memoria:', error);
+                        console.error('Could not clear the in-memory session:', error);
                     }
 
                     sendToRenderer('clear-sensitive-data');

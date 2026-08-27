@@ -472,6 +472,9 @@ function getAllSessions() {
 function deleteSession(sessionId) {
     const sessionPath = getSessionPath(sessionId);
     try {
+        // Las miniaturas viven en `history/<sessionId>/`: si se quedaran, borrar la
+        // sesión dejaría capturas de pantalla huérfanas en disco.
+        require('./core/screenshots').deleteSessionScreenshots(getHistoryDir(), sessionId);
         if (fs.existsSync(sessionPath)) {
             fs.unlinkSync(sessionPath);
             return true;
@@ -486,8 +489,10 @@ function deleteAllSessions() {
     const historyDir = getHistoryDir();
     try {
         if (fs.existsSync(historyDir)) {
+            const { deleteSessionScreenshots } = require('./core/screenshots');
             const files = fs.readdirSync(historyDir).filter(f => f.endsWith('.json'));
             files.forEach(file => {
+                deleteSessionScreenshots(historyDir, file.replace('.json', ''));
                 fs.unlinkSync(path.join(historyDir, file));
             });
         }
@@ -542,6 +547,7 @@ module.exports = {
     getModelForToday,
 
     // History
+    getHistoryDir,
     saveSession,
     getSession,
     getAllSessions,

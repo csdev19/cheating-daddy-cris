@@ -168,8 +168,8 @@ async function handleSpeechEnd(audioData, speaker = 'them') {
         // Solo acumulamos contexto. El modelo se invoca con el atajo, no aquí (D1).
         onTranscription(speaker, transcription.trim());
     } catch (error) {
-        console.error('[LocalAI] Error de transcripción:', error);
-        sendToRenderer('update-status', 'Error de transcripción: ' + error.message);
+        console.error('[LocalAI] Transcription error:', error);
+        sendToRenderer('update-status', 'Transcription error: ' + error.message);
     }
 }
 
@@ -442,7 +442,7 @@ async function startTranscription({ whisperModel }) {
 
     isLocalActive = true;
     sendToRenderer('local-ai-download-progress', { active: false });
-    console.log('[LocalAI] Transcripción local lista con', whisperModel);
+    console.log('[LocalAI] Local transcription ready with', whisperModel);
     return true;
 }
 
@@ -646,12 +646,12 @@ async function sendLocalImage(base64Data, prompt) {
 // Equivalente local del adaptador de proveedor: mismo payload neutro, servidor llama.cpp.
 async function sendLocalPayload(payload) {
     if (!llamaProcess) {
-        throw new Error('No hay razonamiento local activo');
+        throw new Error('Local reasoning is not running');
     }
 
     const content = [];
     if (payload.transcript) {
-        content.push({ type: 'text', text: `Conversación hasta ahora:\n\n${payload.transcript}` });
+        content.push({ type: 'text', text: `Conversation so far:\n\n${payload.transcript}` });
     }
     if (payload.image) {
         content.push({ type: 'image_url', image_url: { url: `data:${payload.image.mimeType};base64,${payload.image.data}` } });

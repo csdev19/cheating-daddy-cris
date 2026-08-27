@@ -65,7 +65,7 @@ test('ask envía el payload al proveedor y registra la respuesta', async () => {
 
 test('ask falla claramente si no hay sesión activa', async () => {
     const gestor = createSessionManager({ configDir: crearConfigDir(), sendToProvider: async () => 'x' });
-    await assert.rejects(() => gestor.ask({ question: 'x' }), /sesión/i);
+    await assert.rejects(() => gestor.ask({ question: 'x' }), /no active session/i);
 });
 
 test('ask rechaza una segunda petición mientras la primera está en curso (B6)', async () => {
@@ -77,7 +77,7 @@ test('ask rechaza una segunda petición mientras la primera está en curso (B6)'
     gestor.start({ profileName: 'entrevista', sessionId: 's1' });
 
     const primera = gestor.ask({ question: 'a' });
-    await assert.rejects(() => gestor.ask({ question: 'b' }), /en curso/);
+    await assert.rejects(() => gestor.ask({ question: 'b' }), /already in flight/i);
     resolver('ok');
     assert.strictEqual(await primera, 'ok');
 });
@@ -130,4 +130,95 @@ test('end cierra la sesión', () => {
     gestor.start({ profileName: 'entrevista', sessionId: 's1' });
     gestor.end();
     assert.strictEqual(gestor.getContext(), null);
+});
+
+// La vista pinta el hilo, así que necesita enterarse de cada evento en cuanto
+// ocurre. `onEvent` es el único punto por donde salen: sin él, la UI tendría que
+// sondear el contexto.
+test('onEvent notifica cada turno de voz recién registrado', () => {
+    const vistos = [];
+    const gestor = createSessionManager({
+        configDir: crearConfigDir(),
+        sendToProvider: async () => 'ok',
+        onEvent: e => vistos.push(e),
+    });
+    gestor.start({ profileName: 'entrevista', sessionId: 's1' });
+
+    gestor.recordSpeech('them', '¿Qué sabes de Node?');
+
+    assert.strictEqual(vistos.length, 1);
+    assert.strictEqual(vistos[0].kind, 'speech');
+    assert.strictEqual(vistos[0].speaker, 'them');
+    assert.strictEqual(vistos[0].text, '¿Qué sabes de Node?');
+});
+
+test('onEvent no dispara con un turno de voz vacío', () => {
+    const vistos = [];
+    const gestor = createSessionManager({
+        configDir: crearConfigDir(),
+        sendToProvider: async () => 'ok',
+        onEvent: e => vistos.push(e),
+    });
+    gestor.start({ profileName: 'entrevista', sessionId: 's1' });
+
+    gestor.recordSpeech('me', '   ');
+
+    assert.deepStrictEqual(vistos, []);
+});
+
+test('onEvent notifica la captura de pantalla', () => {
+    const vistos = [];
+    const gestor = createSessionManager({
+        configDir: crearConfigDir(),
+        sendToProvider: async () => 'ok',
+        onEvent: e => vistos.push(e),
+    });
+    gestor.start({ profileName: 'entrevista', sessionId: 's1' });
+
+    gestor.recordScreen('s1/screen-1.jpg');
+
+    assert.strictEqual(vistos.length, 1);
+    assert.strictEqual(vistos[0].kind, 'screen');
+    assert.strictEqual(vistos[0].imageRef, 's1/screen-1.jpg');
+});
+
+test('onEvent notifica la pregunta una vez ya tiene respuesta', async () => {
+    const vistos = [];
+    const gestor = createSessionManager({
+        configDir: crearConfigDir(),
+        sendToProvider: async () => 'Menciona lock ordering.',
+        onEvent: e => vistos.push(e),
+    });
+    gestor.start({ profileName: 'entrevista', sessionId: 's1' });
+
+    await gestor.ask({ question: '¿Qué me falta?' });
+
+    assert.strictEqual(vistos.length, 1);
+    assert.strictEqual(vistos[0].kind, 'ask');
+    assert.strictEqual(vistos[0].question, '¿Qué me falta?');
+    assert.strictEqual(vistos[0].answer, 'Menciona lock ordering.');
+});
+
+// Si el proveedor falla no hay nada que añadir al hilo: la vista debe quedarse
+// como estaba, no con una pregunta huérfana.
+test('una petición fallida no emite evento', async () => {
+    const vistos = [];
+    const gestor = createSessionManager({
+        configDir: crearConfigDir(),
+        sendToProvider: async () => {
+            throw new Error('sin red');
+        },
+        onEvent: e => vistos.push(e),
+    });
+    gestor.start({ profileName: 'entrevista', sessionId: 's1' });
+
+    await assert.rejects(() => gestor.ask({ question: '¿Y ahora?' }));
+    assert.deepStrictEqual(vistos, []);
+});
+
+test('el gestor funciona sin onEvent', () => {
+    const gestor = createSessionManager({ configDir: crearConfigDir(), sendToProvider: async () => 'ok' });
+    gestor.start({ profileName: 'entrevista', sessionId: 's1' });
+
+    assert.doesNotThrow(() => gestor.recordSpeech('them', 'Hola'));
 });

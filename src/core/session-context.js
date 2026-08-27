@@ -1,39 +1,44 @@
 const SPEAKERS = ['them', 'me'];
-const SPEAKER_LABELS = { them: 'Entrevistador', me: 'Yo' };
+// Labels that go into the transcript the model reads. Deliberately neutral: the
+// 'them' channel can hold more than one person (finding C1).
+const SPEAKER_LABELS = { them: 'Them', me: 'Me' };
 
 // El hilo único de la sesión. Sustituye a conversationHistory + screenAnalysisHistory,
 // que vivían separados y nunca llegaban juntos al modelo (ver hallazgo H3).
 function createSessionContext({ sessionId, profileName = null, now = Date.now, events = [] } = {}) {
-    if (!sessionId) throw new TypeError('createSessionContext requiere sessionId');
+    if (!sessionId) throw new TypeError('createSessionContext requires sessionId');
 
     const thread = events.slice();
 
+    // Devuelve el evento para que quien lo registra pueda propagarlo (ver `onEvent`
+    // en session.js): la vista necesita el evento exacto que entró al hilo.
     function push(event) {
         thread.push(event);
         thread.sort((a, b) => a.t - b.t);
+        return event;
     }
 
     function addSpeech({ speaker, text, t }) {
         if (!SPEAKERS.includes(speaker)) {
-            throw new TypeError(`speaker debe ser 'them' o 'me', recibido: ${speaker}`);
+            throw new TypeError(`speaker must be 'them' or 'me', got: ${speaker}`);
         }
         const clean = (text || '').trim();
-        if (!clean) return;
-        push({ t: t ?? now(), kind: 'speech', speaker, text: clean });
+        if (!clean) return null;
+        return push({ t: t ?? now(), kind: 'speech', speaker, text: clean });
     }
 
     function addScreen({ imageRef, caption = null, t }) {
-        if (!imageRef) throw new TypeError('addScreen requiere imageRef');
-        push({ t: t ?? now(), kind: 'screen', imageRef, caption });
+        if (!imageRef) throw new TypeError('addScreen requires imageRef');
+        return push({ t: t ?? now(), kind: 'screen', imageRef, caption });
     }
 
     function addAsk({ question, answer, t }) {
-        push({ t: t ?? now(), kind: 'ask', question: (question || '').trim(), answer: (answer || '').trim() });
+        return push({ t: t ?? now(), kind: 'ask', question: (question || '').trim(), answer: (answer || '').trim() });
     }
 
     function addChecklist({ itemId, status, t }) {
-        if (!itemId) throw new TypeError('addChecklist requiere itemId');
-        push({ t: t ?? now(), kind: 'checklist', itemId, status });
+        if (!itemId) throw new TypeError('addChecklist requires itemId');
+        return push({ t: t ?? now(), kind: 'checklist', itemId, status });
     }
 
     function getEvents() {

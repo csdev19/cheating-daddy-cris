@@ -186,6 +186,14 @@ export class HistoryView extends LitElement {
                 white-space: pre-wrap;
             }
 
+            .history-shot {
+                display: block;
+                max-width: 100%;
+                margin-top: var(--space-sm);
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+            }
+
             .message-meta {
                 font-size: 10px;
                 margin-top: 4px;
@@ -284,6 +292,7 @@ export class HistoryView extends LitElement {
         loading: { type: Boolean },
         activeTab: { type: String },
         searchQuery: { type: String },
+        _thumbs: { state: true },
     };
 
     constructor() {
@@ -294,6 +303,7 @@ export class HistoryView extends LitElement {
         this.loading = true;
         this.activeTab = 'conversation';
         this.searchQuery = '';
+        this._thumbs = new Map();
         this.loadSessions();
     }
 
@@ -389,18 +399,36 @@ export class HistoryView extends LitElement {
         });
     }
 
-    collectConversation(session) {
-        const messages = [];
-        const events = session.events || [];
-        events
-            .filter(e => e.kind === 'speech' || e.kind === 'ask')
-            .forEach(e => {
-                if (e.kind === 'speech') {
-                    messages.push({ type: e.speaker === 'me' ? 'me' : 'them', content: e.text, timestamp: e.t });
-                } else if (e.answer) {
-                    messages.push({ type: 'ai', content: e.answer, timestamp: e.t });
-                }
+    // Las miniaturas viven en disco bajo `history/<sessionId>/`; el hilo solo
+    // guarda la ref, así que se piden al main cuando hacen falta.
+    renderShot(ref) {
+        if (!ref) return '';
+        if (!this._thumbs.has(ref) && window.require) {
+            this._thumbs.set(ref, null);
+            const { ipcRenderer } = window.require('electron');
+            ipcRenderer.invoke('read-screenshot', ref).then(dataUrl => {
+                if (dataUrl) this._thumbs = new Map(this._thumbs).set(ref, dataUrl);
             });
+        }
+        const src = this._thumbs.get(ref);
+        return src ? html`<img class="history-shot" src=${src} alt="Screen capture" />` : '';
+    }
+
+    // Misma proyección que la vista en vivo (src/core/thread-view.js): los segmentos
+    // troceados por el VAD se releen fusionados, igual que se vieron durante la sesión.
+    collectConversation(session) {
+        const project = window.threadView?.projectThread;
+        const rows = project ? project(session.events || []) : [];
+        const messages = [];
+
+        for (const row of rows) {
+            if (row.kind === 'speech') {
+                messages.push({ type: row.speaker === 'me' ? 'me' : 'them', content: row.text, timestamp: row.t });
+            } else if (row.kind === 'ask') {
+                if (row.question) messages.push({ type: 'me', content: row.question, timestamp: row.t });
+                if (row.answer) messages.push({ type: 'ai', content: row.answer, timestamp: row.t });
+            }
+        }
         return messages;
     }
 
@@ -415,7 +443,7 @@ export class HistoryView extends LitElement {
             // El resumen va primero: normalmente es lo único que hace falta releer (M2).
             const resumen = digest
                 ? html`<div class="session-digest">
-                      <div class="session-digest-title">Resumen</div>
+                      <div class="session-digest-title">Summary</div>
                       <div class="session-digest-body">${digest}</div>
                   </div>`
                 : '';
@@ -439,8 +467,9 @@ export class HistoryView extends LitElement {
                 entry => html`
                     <div class="message-row screen">
                         <div class="message">
-                            <div class="message-body">${entry.response || ''}</div>
-                            <div class="message-meta">${this.formatTime(entry.timestamp)}</div>
+                            <div class="message-body">${entry.caption || 'Screen captured'}</div>
+                            ${this.renderShot(entry.imageRef)}
+                            <div class="message-meta">${this.formatTime(entry.t)}</div>
                         </div>
                     </div>
                 `

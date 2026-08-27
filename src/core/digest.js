@@ -3,9 +3,9 @@ const path = require('path');
 
 function buildDigestPrompt(transcript) {
     return [
-        'Resume esta reunión en 10-15 líneas, en español, para que yo lo lea antes de la próxima con las mismas personas.',
-        'Secciones: **Acuerdos**, **Pendientes** (quién debe qué), **Nombres y roles** mencionados, **Cifras y fechas** citadas.',
-        'Solo lo que se dijo. Si una sección queda vacía, omítela.',
+        'Summarise this meeting in 10-15 lines so I can read it before the next one with the same people.',
+        'Sections: **Agreements**, **Open items** (who owes what), **Names and roles** mentioned, **Figures and dates** quoted.',
+        'Only what was actually said. If a section would be empty, leave it out.',
         '',
         '---',
         transcript,
@@ -15,7 +15,7 @@ function buildDigestPrompt(transcript) {
 // Añade el resumen al historial del perfil, que la siguiente sesión cargará como
 // una nota más (D17). Se recorta para que el prefijo cacheado no crezca sin límite.
 function appendDigest({ profilesDir, profileName, digest, date, maxEntries = 20 }) {
-    const ruta = path.join(profilesDir, profileName, 'context', 'historial.md');
+    const ruta = path.join(profilesDir, profileName, 'context', 'history.md');
     fs.mkdirSync(path.dirname(ruta), { recursive: true });
 
     const existente = fs.existsSync(ruta) ? fs.readFileSync(ruta, 'utf8') : '';

@@ -160,56 +160,29 @@ function arrayBufferToBase64(buffer) {
     return btoa(binary);
 }
 
-async function initializeGemini(profile = 'interview', language = 'en-US') {
-    const apiKey = await storage.getApiKey();
-    if (apiKey) {
-        const prefs = await storage.getPreferences();
-        const success = await ipcRenderer.invoke('initialize-gemini', apiKey, prefs.customPrompt || '', profile, language);
-        if (success) {
-            cheatingDaddy.setStatus('Live');
-        } else {
-            cheatingDaddy.setStatus('error');
-        }
-    }
+// The profile list comes from disk: a hardcoded list drifts from the folders that
+// actually exist, and picking a missing profile breaks the session on start.
+async function listProfiles() {
+    const result = await ipcRenderer.invoke('list-profiles');
+    return result.success ? result.data : [];
 }
 
-async function initializeLocal(profile = 'interview') {
-    const prefs = await storage.getPreferences();
-    const localLlmModel = prefs.localLlmModel || 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
-    const whisperModel = prefs.whisperModel || 'large-v3-turbo';
-    const customPrompt = prefs.customPrompt || '';
+// Punto de entrada único de sesión. El renderer ya no elige proveedor: manda el
+// perfil y el main resuelve transcripción y razonamiento como ejes separados (D14).
+async function initializeSession(profileName = 'interview') {
+    const result = await ipcRenderer.invoke('initialize-session', { profileName });
 
-    const success = await ipcRenderer.invoke('initialize-local', localLlmModel, whisperModel, profile, customPrompt);
-    if (success) {
-        cheatingDaddy.setStatus('Local AI Live');
-        return true;
-    } else {
+    if (!result.success) {
         cheatingDaddy.setStatus('error');
-        return false;
+        return result;
     }
+
+    cheatingDaddy.setStatus(result.modes.reasoning === 'local-llama' ? 'Local AI Live' : 'Live');
+    return result;
 }
 
 async function cancelLocalInitialization() {
     return ipcRenderer.invoke('cancel-local-initialization');
-}
-
-async function initializeCloud(profile = 'interview') {
-    const creds = await storage.getCredentials();
-    const token = creds.cloudToken;
-    if (!token || !token.trim()) {
-        cheatingDaddy.setStatus('error');
-        return false;
-    }
-
-    const prefs = await storage.getPreferences();
-    const success = await ipcRenderer.invoke('initialize-cloud', token, profile, prefs.customPrompt || '');
-    if (success) {
-        cheatingDaddy.setStatus('Live');
-        return true;
-    } else {
-        cheatingDaddy.setStatus('error');
-        return false;
-    }
 }
 
 // Listen for status updates
@@ -573,6 +546,7 @@ async function captureManualScreenshot(imageQuality = null) {
                 // Send image with prompt to HTTP API (response streams via IPC events)
                 const result = await ipcRenderer.invoke('send-image-content', {
                     data: base64data,
+                    thumbnail: buildThumbnail(destW, destH),
                 });
 
                 if (result.success) {
@@ -580,7 +554,7 @@ async function captureManualScreenshot(imageQuality = null) {
                     // Response already displayed via streaming events (new-response/update-response)
                 } else {
                     console.error('Failed to get image response:', result.error);
-                    cheatingDaddy.addNewResponse(`Error: ${result.error}`);
+                    cheatingDaddy.addNotice(`Error: ${result.error}`);
                 }
             };
             reader.readAsDataURL(blob);
@@ -588,6 +562,25 @@ async function captureManualScreenshot(imageQuality = null) {
         'image/jpeg',
         qualityValue
     );
+}
+
+// El hilo guarda una miniatura, no la imagen que ve el modelo: lo que se persiste
+// solo tiene que servir para reconocer de un vistazo qué había en pantalla.
+const THUMBNAIL_WIDTH = 320;
+
+function buildThumbnail(srcW, srcH) {
+    try {
+        const width = Math.min(THUMBNAIL_WIDTH, srcW);
+        const height = Math.round(srcH * (width / srcW));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(offscreenCanvas, 0, 0, width, height);
+        return canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+    } catch (error) {
+        console.warn('Could not build the thumbnail:', error);
+        return null;
+    }
 }
 
 // Expose functions to global scope for external access
@@ -699,8 +692,8 @@ ipcRenderer.on('save-screen-analysis', async (event, data) => {
 // M4: preguntar sin mandar pantalla. "Qué me falta decir" no necesita imagen,
 // y mandarla encarece y a veces despista al modelo.
 ipcRenderer.on('ask-no-screen', async () => {
-    const result = await ipcRenderer.invoke('send-text-message', '¿Qué me estoy olvidando de decir o preguntar?');
-    if (!result.success) cheatingDaddy.addNewResponse(`Error: ${result.error}`);
+    const result = await ipcRenderer.invoke('send-text-message', 'What am I forgetting to say or ask?');
+    if (!result.success) cheatingDaddy.addNotice(`Error: ${result.error}`);
 });
 
 ipcRenderer.on('save-session-digest', async (event, { sessionId, digest }) => {
@@ -1022,13 +1015,11 @@ const cheatingDaddy = {
 
     // Status and response functions
     setStatus: text => cheatingDaddyApp.setStatus(text),
-    addNewResponse: response => cheatingDaddyApp.addNewResponse(response),
-    updateCurrentResponse: response => cheatingDaddyApp.updateCurrentResponse(response),
+    addNotice: text => cheatingDaddyApp.addNotice(text),
 
     // Core functionality
-    initializeGemini,
-    initializeCloud,
-    initializeLocal,
+    initializeSession,
+    listProfiles,
     cancelLocalInitialization,
     startCapture,
     stopCapture,
