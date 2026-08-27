@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Compara modelos de Whisper sobre el MISMO archivo de audio.
-// Lo que decide no es el WER de un leaderboard, sino cuál entiende TU audio (D4/D21).
+// Compares Whisper models over the SAME audio file.
+// What decides is not a leaderboard's WER, but which one understands YOUR audio (D4/D21).
 //
-// Uso: npm run bench:stt -- grabacion.wav [large-v3-turbo small.en ...]
+// Usage: npm run bench:stt -- recording.wav [large-v3-turbo small.en ...]
 const fs = require('fs');
 const path = require('path');
 const {
@@ -14,9 +14,9 @@ const {
     waitForServer,
 } = require('../src/utils/native-ai-runtime');
 
-const MODELOS_POR_DEFECTO = ['tiny.en', 'small.en', 'large-v3-turbo'];
+const DEFAULT_MODELS = ['tiny.en', 'small.en', 'large-v3-turbo'];
 
-async function transcribir(baseUrl, wavPath) {
+async function transcribe(baseUrl, wavPath) {
     const form = new FormData();
     form.append('file', new Blob([fs.readFileSync(wavPath)]), path.basename(wavPath));
     form.append('response_format', 'verbose_json');
@@ -28,54 +28,54 @@ async function transcribir(baseUrl, wavPath) {
     const json = await response.json();
     const segments = Array.isArray(json.segments) ? json.segments : [];
 
-    // B3/B10: mostramos no_speech_prob por segmento para calibrar el filtro
-    // de alucinaciones con datos propios en vez de a ojo.
-    const lineas = segments.map(seg => `  [${(seg.no_speech_prob ?? 0).toFixed(2)}] ${(seg.text || '').trim()}`);
-    return lineas.length ? lineas.join('\n') : (json.text || '').trim();
+    // B3/B10: per-segment no_speech_prob, so the hallucination filter is calibrated
+    // from your own data instead of by eye.
+    const lines = segments.map(seg => `  [${(seg.no_speech_prob ?? 0).toFixed(2)}] ${(seg.text || '').trim()}`);
+    return lines.length ? lines.join('\n') : (json.text || '').trim();
 }
 
-async function correrModelo(binario, modelo, wavPath) {
-    const modelPath = await ensureWhisperModel(modelo, () => {});
-    const puerto = await getAvailablePort();
-    const proceso = startNativeServer({
-        executablePath: binario,
-        arguments: ['-m', modelPath, '--host', '127.0.0.1', '--port', String(puerto)],
-        name: `whisper-${modelo}`,
+async function runModel(binary, model, wavPath) {
+    const modelPath = await ensureWhisperModel(model, () => {});
+    const port = await getAvailablePort();
+    const proc = startNativeServer({
+        executablePath: binary,
+        arguments: ['-m', modelPath, '--host', '127.0.0.1', '--port', String(port)],
+        name: `whisper-${model}`,
     });
 
-    const baseUrl = `http://127.0.0.1:${puerto}`;
+    const baseUrl = `http://127.0.0.1:${port}`;
     try {
-        await waitForServer(`${baseUrl}/`, proceso, 120000);
-        const inicio = Date.now();
-        const texto = await transcribir(baseUrl, wavPath);
-        return { texto, ms: Date.now() - inicio };
+        await waitForServer(`${baseUrl}/`, proc, 120000);
+        const startedAt = Date.now();
+        const text = await transcribe(baseUrl, wavPath);
+        return { text, ms: Date.now() - startedAt };
     } finally {
-        stopNativeServer(proceso);
+        stopNativeServer(proc);
     }
 }
 
 async function main() {
-    const [wavPath, ...modelos] = process.argv.slice(2);
+    const [wavPath, ...models] = process.argv.slice(2);
 
     if (!wavPath || !fs.existsSync(wavPath)) {
-        console.error('Uso: npm run bench:stt -- <archivo.wav> [modelo...]');
-        console.error(`Modelos por defecto: ${MODELOS_POR_DEFECTO.join(', ')}`);
+        console.error('Usage: npm run bench:stt -- <file.wav> [model...]');
+        console.error(`Default models: ${DEFAULT_MODELS.join(', ')}`);
         process.exit(1);
     }
 
-    const aProbar = modelos.length > 0 ? modelos : MODELOS_POR_DEFECTO;
-    console.log(`Archivo: ${wavPath}`);
-    console.log(`Modelos: ${aProbar.join(', ')}\n`);
+    const toTest = models.length > 0 ? models : DEFAULT_MODELS;
+    console.log(`File: ${wavPath}`);
+    console.log(`Models: ${toTest.join(', ')}\n`);
 
-    const binario = await ensureNativeBinary('whisper', () => {});
+    const binary = await ensureNativeBinary('whisper', () => {});
 
-    for (const modelo of aProbar) {
+    for (const model of toTest) {
         try {
-            const { texto, ms } = await correrModelo(binario, modelo, wavPath);
-            const aviso = ms > 4000 ? '  ⚠️  >4s: revisa si el binario usa Metal (B10)' : '';
-            console.log(`${'='.repeat(72)}\n${modelo}  —  ${ms} ms${aviso}\n${'='.repeat(72)}\n${texto}\n`);
+            const { text, ms } = await runModel(binary, model, wavPath);
+            const warning = ms > 4000 ? '  ⚠️  >4s: check whether the binary uses Metal (B10)' : '';
+            console.log(`${'='.repeat(72)}\n${model}  —  ${ms} ms${warning}\n${'='.repeat(72)}\n${text}\n`);
         } catch (error) {
-            console.error(`${modelo}: ERROR — ${error.message}\n`);
+            console.error(`${model}: ERROR — ${error.message}\n`);
         }
     }
 }

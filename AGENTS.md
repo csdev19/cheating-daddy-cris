@@ -5,29 +5,31 @@ It provides an Electron-based real-time assistant which captures screen and audi
 for contextual AI responses. The code is JavaScript and uses Electron Forge for
 packaging.
 
-## Fuente de verdad
+## Source of truth
 
-El análisis, el diseño y las decisiones del proyecto viven en **`documentation/`**.
-Léelo antes de tocar código. `documentation/03-decisiones.md` tiene prioridad sobre
-cualquier instrucción de este archivo que la contradiga.
+The project's analysis, design and decisions live in **`documentation/`**. Read it
+before touching code. `documentation/03-decisions.md` takes precedence over any
+instruction in this file that contradicts it.
 
-| Documento                                 | Contenido                                                  |
-| ----------------------------------------- | ---------------------------------------------------------- |
-| `documentation/01-estado-actual.md`       | Hallazgos sobre el código, con referencias `archivo:línea` |
-| `documentation/02-diseno.md`              | Diseño objetivo                                            |
-| `documentation/03-decisiones.md`          | Decisiones D1–D21 y su porqué                              |
-| `documentation/04-evaluaciones.md`        | Librerías y modelos evaluados                              |
-| `documentation/05-plan-implementacion.md` | Plan por tareas                                            |
-| `documentation/06-auditoria.md`           | Auditoría: agujeros, riesgos y mejoras                     |
+| Document                                  | Contents                                             |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `documentation/01-current-state.md`       | Findings about the code, with `file:line` references |
+| `documentation/02-design.md`              | The target design                                    |
+| `documentation/03-decisions.md`           | Decisions D1–D21 and their reasoning                 |
+| `documentation/04-evaluations.md`         | Libraries and models evaluated                       |
+| `documentation/05-implementation-plan.md` | Task-by-task plan                                    |
+| `documentation/06-audit.md`               | Audit: gaps, risks and improvements                  |
 
-## Restricciones
+## Constraints
 
-- **CommonJS y sin build step.** El main process es Node 20 (Electron 30); no usa
-  ESM ni bundlers. `require()` de un paquete ESM **no funciona** ahí.
-- **UI en Lit**, vendorizado en `src/assets/`. No se migra a React ni a shadcn (D19).
-- **Cero dependencias nuevas de runtime** salvo decisión registrada en `03-decisiones.md`.
-- **El renderer sí es contexto de navegador** y ya usa ES modules; ahí sí se puede
-  vendorizar una librería ESM siguiendo el patrón de Lit.
+- **CommonJS and no build step.** The main process is Node 20 (Electron 30); it uses
+  neither ESM nor bundlers. `require()` of an ESM package **does not work** there.
+- **UI in Lit**, vendored in `src/assets/`. No migration to React or shadcn (D19).
+- **No new runtime dependencies** unless a decision is recorded in `03-decisions.md`.
+- **The renderer is a browser context** and already uses ES modules; an ESM library
+  can be vendored there following the Lit pattern.
+- **Everything user-facing is in English** — errors, logs, UI copy and the prompts
+  sent to the model. There is no i18n layer, so no Spanish anywhere.
 
 ## Getting started
 
@@ -36,25 +38,25 @@ cualquier instrucción de este archivo que la contradiga.
 2. npm start
 ```
 
-## Arquitectura
+## Architecture
 
-- `src/core/` — módulos puros y testeables, sin Electron: hilo de contexto, perfiles,
-  ensamblado de payload, VAD, modos, resumen post-sesión.
-- `src/utils/` — adaptadores: `gemini.js` (proveedor nube), `localai.js` (whisper +
-  llama locales), `window.js`, `renderer.js`.
-- `src/components/` — vistas Lit.
+- `src/core/` — pure, testable modules with no Electron: context thread, profiles,
+  payload assembly, VAD, modes, post-session summary, thread projection.
+- `src/utils/` — adapters: `gemini.js` (cloud provider), `localai.js` (local whisper
+    - llama), `window.js`, `renderer.js`.
+- `src/components/` — Lit views.
 
-Los perfiles del usuario viven en disco como carpetas de markdown bajo
-`<configDir>/profiles/`, no en el código.
+The user's profiles live on disk as markdown folders under `<configDir>/profiles/`,
+not in the code. The profile picker reads that folder; never hardcode a list.
 
 ## Tests
 
 ```
-npm test          # node:test, sin dependencias
+npm test          # node:test, no dependencies
 ```
 
-Todo lo que entre en `src/core/` debe llevar tests. Los adaptadores se verifican
-arrancando la app (`npm start`).
+Anything landing in `src/core/` must come with tests. The adapters are verified by
+starting the app (`npm start`).
 
 ## Style
 
@@ -64,10 +66,10 @@ quotes). `src/assets` and `node_modules` are ignored via `.prettierignore`.
 The project does not provide linting; `npm run lint` simply prints
 "No linting configured".
 
-## Herramientas
+## Tools
 
 ```
-npm run bench:stt -- grabacion.wav        # compara modelos de Whisper sobre tu audio
+npm run bench:stt -- recording.wav        # compare Whisper models on your own audio
 ```
 
 ## Merging upstream PRs
@@ -76,7 +78,7 @@ Pull requests from <https://github.com/sohzm/cheating-daddy> are commonly
 cherry-picked here. When merging:
 
 1. Inspect the diff and keep commit messages short (`feat:` / `fix:` etc.).
-2. Comprueba que no reintroduce nada retirado por decisión (por ejemplo
-   `src/utils/prompts.js`, la captura automática de screenshots, o el
-   `providerMode` único).
+2. Check it does not reintroduce anything removed by decision (for example
+   `src/utils/prompts.js`, the automatic screenshot capture, or the single
+   `providerMode`).
 3. After merging, run `npm test` and the application locally.

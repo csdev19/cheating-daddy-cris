@@ -1,48 +1,49 @@
-# Documentación — Asistente de memoria
+# Documentation — Memory assistant
 
-Análisis, decisiones y diseño para convertir `cheating-daddy` de un teleprompter
-de entrevistas en un **asistente personal de memoria** para reuniones y entrevistas.
+Analysis, decisions and design for turning `cheating-daddy` from an interview
+teleprompter into a **personal memory assistant** for meetings and interviews.
 
-Fecha del análisis: **2026-08-25**
-Estado: **diseño auditado (D1–D20), plan enmendado y listo para ejecutar**
+Analysis date: **2026-08-25**
+Status: **design audited (D1–D20), plan amended and ready to execute**
 
-## Resumen ejecutivo
+## Executive summary
 
-La app hoy es un teleprompter: escucha al entrevistador y te dicta, palabra por
-palabra, qué responder. El objetivo es lo contrario — que te recuerde **lo que tú
-ya sabes pero se te olvida** en el momento.
+Today the app is a teleprompter: it listens to the interviewer and dictates, word
+by word, what to answer. The goal is the opposite — for it to remind you of
+**what you already know but forget** in the moment.
 
-Cuatro capacidades objetivo:
+Four target capabilities:
 
-1. **Material previo** — tus notas, CV, cifras y decisiones afloran cuando aplican.
-2. **Hilo de la reunión** — qué se dijo, quién lo dijo, qué quedó pendiente.
-3. **Checklist activo** — lo que no debes olvidar decir o preguntar.
-4. **Lookup al vuelo** — un concepto o un nombre que acaba de salir.
+1. **Prior material** — your notes, CV, figures and decisions surface when they apply.
+2. **Meeting thread** — what was said, who said it, what was left open.
+3. **Live checklist** — what you must not forget to say or ask.
+4. **Lookup on the fly** — a concept or a name that just came up.
 
-El cambio de fondo no es añadir funciones, es **construir un hilo único de contexto**
-que fusione lo que la app oye, lo que ve y lo que sabe de ti. Hoy son tres cosas
-desconectadas, y por eso la app se siente ciega y sin memoria.
+The underlying change is not adding features, it is **building a single context
+thread** that fuses what the app hears, what it sees and what it knows about you.
+Today those are three disconnected things, which is why the app feels blind and
+forgetful.
 
-Principio rector: **reactivo**. La app escucha y acumula contexto en silencio, y
-solo responde cuando pulsas un atajo. Cero ruido durante la reunión, y de paso
-deja de quemar llamadas al modelo en cada turno.
+Guiding principle: **reactive**. The app listens and accumulates context quietly,
+and only answers when you press a shortcut. No noise during the meeting, and it
+stops burning model calls on every turn.
 
-## Índice
+## Index
 
-| Documento                                              | Contenido                                                        |
-| ------------------------------------------------------ | ---------------------------------------------------------------- |
-| [01-estado-actual.md](01-estado-actual.md)             | Qué hace el repo hoy, con hallazgos y referencias a código       |
-| [02-diseno.md](02-diseno.md)                           | El diseño objetivo: núcleo de contexto, perfiles, captura        |
-| [03-decisiones.md](03-decisiones.md)                   | Registro de decisiones y por qué se tomaron                      |
-| [04-evaluaciones.md](04-evaluaciones.md)               | Librerías y modelos evaluados, con datos y precios               |
-| [05-plan-implementacion.md](05-plan-implementacion.md) | Plan de implementación: 15 tareas, 58 tests, enmiendas aplicadas |
-| [06-auditoria.md](06-auditoria.md)                     | Auditoría: agujeros, riesgos, mejoras y enmiendas al plan        |
+| Document                                               | Contents                                                    |
+| ------------------------------------------------------ | ----------------------------------------------------------- |
+| [01-current-state.md](01-current-state.md)             | What the repo does today, with findings and code references |
+| [02-design.md](02-design.md)                           | The target design: context core, profiles, capture          |
+| [03-decisions.md](03-decisions.md)                     | Decision log and the reasoning behind each one              |
+| [04-evaluations.md](04-evaluations.md)                 | Libraries and models evaluated, with data and prices        |
+| [05-implementation-plan.md](05-implementation-plan.md) | Implementation plan: 15 tasks, 58 tests, amendments applied |
+| [06-audit.md](06-audit.md)                             | Audit: gaps, risks, improvements and amendments to the plan |
 
-## Cómo leerlo
+## How to read it
 
-Si vas a implementar, lee `02-diseno.md` y consulta `03-decisiones.md` cuando algo
-te parezca arbitrario — casi siempre hay una razón registrada, incluidas las
-decisiones que se revirtieron a mitad del análisis.
+If you are implementing, read `02-design.md` and consult `03-decisions.md`
+whenever something looks arbitrary — there is almost always a recorded reason,
+including the decisions that were reversed halfway through the analysis.
 
-Si vas a cuestionar el diseño, empieza por `01-estado-actual.md`: los hallazgos
-ahí son la evidencia sobre la que se apoya todo lo demás.
+If you are going to challenge the design, start with `01-current-state.md`: the
+findings there are the evidence everything else rests on.
