@@ -26,6 +26,7 @@ let initializationController = null;
 let llamaCacheSnapshot = new Set();
 
 const { createVad, VAD_MODES } = require('../core/vad');
+const { cleanTranscription } = require('../core/transcript-filter');
 
 // Serialises requests to whisper-server (it handles one at a time) and drops the
 // oldest if a backlog builds up, so the lag cannot grow without bound (B2).
@@ -132,15 +133,8 @@ async function transcribeAudio(pcm16kBuffer) {
     const segments = Array.isArray(result.segments) ? result.segments : null;
 
     // Whisper invents phrases over silence and noise; no_speech_prob plus a short
-    // list of known filler removes most of them (B3).
-    const text = segments
-        ? segments
-              .filter(seg => (seg.no_speech_prob ?? 0) < 0.6)
-              .map(seg => (seg.text || '').trim())
-              .filter(t => t && !HALLUCINATIONS.some(rx => rx.test(t)))
-              .join(' ')
-              .trim()
-        : (result.text || '').trim();
+    // list of known filler removes most of them (B3). See core/transcript-filter.
+    const text = segments ? cleanTranscription(segments) : (result.text || '').trim();
 
     console.log('[LocalAI] Transcription:', text);
     return text;

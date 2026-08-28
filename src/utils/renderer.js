@@ -477,6 +477,54 @@ function setupWindowsLoopbackProcessing() {
 // model is only called from the shortcut, so sending images on a loop just burned
 // calls nobody asked for.
 
+// The stream runs at 1 fps, so after the window steps aside the latest decoded
+// frame is still the old one, window included. This waits for genuinely new frames
+// and raises the rate for the moment it takes, instead of capturing something stale.
+const CAPTURE_FPS = 15;
+const FRESH_FRAMES_NEEDED = 2;
+const FRAME_WAIT_TIMEOUT_MS = 1500;
+
+function waitForFreshFrame(video) {
+    return new Promise(resolve => {
+        if (typeof video.requestVideoFrameCallback !== 'function') {
+            // Without the callback there is no way to know a frame is new; fall back
+            // to a wait long enough for one to have arrived at the raised rate.
+            setTimeout(resolve, 250);
+            return;
+        }
+
+        let seen = 0;
+        const timer = setTimeout(resolve, FRAME_WAIT_TIMEOUT_MS);
+        const onFrame = () => {
+            if (++seen >= FRESH_FRAMES_NEEDED) {
+                clearTimeout(timer);
+                resolve();
+                return;
+            }
+            video.requestVideoFrameCallback(onFrame);
+        };
+        video.requestVideoFrameCallback(onFrame);
+    });
+}
+
+async function stepWindowAside(track) {
+    await ipcRenderer.invoke('window-step-aside');
+    try {
+        await track?.applyConstraints({ frameRate: CAPTURE_FPS });
+    } catch (error) {
+        console.warn('Could not raise the capture frame rate:', error);
+    }
+}
+
+async function stepWindowBack(track) {
+    try {
+        await track?.applyConstraints({ frameRate: 1 });
+    } catch (error) {
+        console.warn('Could not restore the capture frame rate:', error);
+    }
+    await ipcRenderer.invoke('window-step-back');
+}
+
 async function captureManualScreenshot(imageQuality = null) {
     console.log('Manual screenshot triggered');
     const quality = imageQuality || currentImageQuality;
@@ -524,7 +572,17 @@ async function captureManualScreenshot(imageQuality = null) {
     }
     offscreenCanvas.width = destW;
     offscreenCanvas.height = destH;
-    offscreenContext.drawImage(hiddenVideo, 0, 0, destW, destH);
+
+    // The window steps aside for the frame and is restored no matter what, so a
+    // failure here can never leave the overlay invisible.
+    const videoTrack = mediaStream.getVideoTracks()[0];
+    try {
+        await stepWindowAside(videoTrack);
+        await waitForFreshFrame(hiddenVideo);
+        offscreenContext.drawImage(hiddenVideo, 0, 0, destW, destH);
+    } finally {
+        await stepWindowBack(videoTrack);
+    }
 
     let qualityValue;
     switch (quality) {

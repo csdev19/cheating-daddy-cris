@@ -327,6 +327,31 @@ function setupWindowIpcHandlers(mainWindow, sendToRenderer, geminiSessionRef) {
         }
     });
 
+    // The window is already excluded from screen capture by setContentProtection,
+    // but the overlay is asked to step aside anyway while a screenshot is taken.
+    // Opacity rather than hide(): an always-on-top panel that hides and shows again
+    // on macOS can steal focus, and losing focus mid-meeting is worse than the
+    // problem being solved.
+    ipcMain.handle('window-step-aside', () => {
+        try {
+            mainWindow?.setOpacity(0);
+            return { success: true };
+        } catch (error) {
+            console.error('Could not hide the window for capture:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('window-step-back', () => {
+        try {
+            mainWindow?.setOpacity(1);
+            return { success: true };
+        } catch (error) {
+            console.error('Could not restore the window after capture:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('window-minimize', () => {
         if (!mainWindow.isDestroyed()) {
             mainWindow.minimize();
