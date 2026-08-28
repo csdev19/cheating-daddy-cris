@@ -468,3 +468,51 @@ known junk phrases, and segments that are nothing but a tag or a sound effect �
 
 Both are recorded rather than implemented so the current filter can be judged on
 real sessions first.
+
+---
+
+## D26 — A session is a folder: metadata written atomically, events append-only
+
+**Decision:** each session lives in `history/<sessionId>/` holding `session.json`
+(metadata, written atomically), `events.jsonl` (the thread, appended one line per
+event), `transcript.md` (derived, readable) and the screenshots that were already
+there. Sessions in the old flat layout keep working and are never rewritten.
+
+**Why:** the thread was one JSON document rewritten in full on every save, with a
+one-second debounce. Two things followed. `fs.writeFileSync` truncates before
+writing, so a crash during a save destroyed the whole session rather than losing
+the last change — and because the document grew with the meeting, the exposure grew
+with it. And the debounce reset on every event, so a burst could starve the save
+indefinitely.
+
+Appending one line per event removes both: nothing that grows is ever rewritten,
+there is no debounce, and a crash costs at most the line being written. A torn
+final line is skipped on read and everything before it survives — verified by
+truncating a log on purpose.
+
+**Why not SQLite:** it was the obvious suggestion and it does not fit. Electron 30
+is Node 20, where `node:sqlite` does not exist, so it would mean a native
+dependency against a recorded constraint. More to the point, for this workload —
+append events, read one session whole — an append-only log gives the same crash
+durability, and the data stays as files the person can read, grep, back up and sync
+with anything. For a memory assistant that is a property of the product, not a
+detail. SQLite would win if sessions were queried against each other, and they are
+not.
+
+**JSON for records, Markdown for prose.** Measured on real sessions: 151 bytes per
+event as JSONL against 92 as Markdown — 44 KB versus 27 KB for an hour-long
+meeting. Scale decides nothing at that size. What decides it is that events carry
+structure (`echo`, `imageRef`, a question paired with its answer, timestamps to the
+millisecond) which Markdown could only encode by convention, needing a parser with
+ambiguous cases as soon as someone says something containing `**`. Append-only
+JSONL is also far easier to sync than prose: a client appends bytes and conflicts
+resolve as a union of lines.
+
+The Markdown that matters to a person already exists and stays Markdown: the
+profile, its context notes, and the summaries (D7, D17). `transcript.md` joins them
+as a derived view — regenerable from the log, so there are never two sources of
+truth.
+
+**Still not covered:** audio captured but not yet transcribed — up to
+`maxSegmentSeconds` in the VAD plus whatever is queued for Whisper — is not on disk
+in any form, and no storage choice would change that.

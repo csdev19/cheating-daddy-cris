@@ -11,10 +11,20 @@ const { resolveModes, resolveReasoningModel, resolveAudioTarget } = require('../
 const { createLevelTracker } = require('../core/audio-levels');
 const { calculateRms } = require('../core/vad');
 const { getProfilesDir, resolveProfileName, loadProfile } = require('../core/profiles');
-const { getPreferences, getConfigDir, getHistoryDir, saveSession, getSession, getAllSessions } = require('../storage');
+const {
+    getPreferences,
+    getConfigDir,
+    getHistoryDir,
+    saveSession,
+    getSession,
+    getAllSessions,
+    appendSessionEvent,
+    writeSessionTranscript,
+} = require('../storage');
 const { saveScreenshot, resolveScreenshotPath } = require('../core/screenshots');
 const { projectThread } = require('../core/thread-view');
 const { selectPendingDigests } = require('../core/digest-queue');
+const { renderTranscriptMarkdown } = require('../core/transcript-md');
 
 // Lazy-loaded to avoid circular dependency (localai.js imports from gemini.js)
 let _localai = null;
@@ -124,42 +134,39 @@ async function sendPayloadToGemini(payload) {
     return fullText.trim();
 }
 
-// The thread is saved with some slack: during a meeting a speech event lands every
-// few seconds and there is no need to rewrite the JSON for each one.
-const THREAD_SAVE_DEBOUNCE_MS = 1000;
-let threadSaveTimer = null;
-
-function persistThread() {
+// Each event is appended the moment it happens. There is no debounce and no
+// rewrite: the log only grows, so a crash costs at most the line being written
+// rather than the session it was growing into (D26).
+function persistEvent(event) {
     const ctx = sessionManager.getContext();
     if (!ctx) return;
-    const { sessionId, profileName, events } = ctx.toJSON();
+    appendSessionEvent(ctx.toJSON().sessionId, event);
+}
+
+// The readable face of the session, regenerated from the log whenever it changes
+// shape. It is derived, never a second source of truth.
+function writeTranscript(sessionId, events, digest = null) {
     try {
-        saveSession(sessionId, { profile: profileName, events });
+        const stored = getSession(sessionId);
+        writeSessionTranscript(
+            sessionId,
+            renderTranscriptMarkdown({
+                sessionId,
+                profileName: stored?.profileName || stored?.profile || null,
+                events,
+                digest: digest ?? stored?.digest ?? null,
+            })
+        );
     } catch (error) {
-        console.error('Could not save the session thread:', error);
+        console.error('Could not write the readable transcript:', error);
     }
-}
-
-function scheduleThreadSave() {
-    if (threadSaveTimer) clearTimeout(threadSaveTimer);
-    threadSaveTimer = setTimeout(() => {
-        threadSaveTimer = null;
-        persistThread();
-    }, THREAD_SAVE_DEBOUNCE_MS);
-}
-
-function flushThreadSave() {
-    if (threadSaveTimer) {
-        clearTimeout(threadSaveTimer);
-        threadSaveTimer = null;
-    }
-    persistThread();
 }
 
 const sessionManager = createSessionManager({
     configDir: getConfigDir(),
     // The view is a projection of the thread: every event that lands is forwarded as is.
     onEvent: event => {
+        persistEvent(event);
         sendToRenderer('thread-event', event);
         // Warn once per session: without headphones the mic re-records the speakers,
         // and the person cannot tell why their own turns are duplicated (B1/D18).
@@ -167,7 +174,6 @@ const sessionManager = createSessionManager({
             echoWarned = true;
             sendToRenderer('echo-detected');
         }
-        scheduleThreadSave();
     },
     // The provider adapter lives here: it is the only thing that knows about Gemini.
     // Applies D13: a confidential profile never leaves the machine, even when the
@@ -236,6 +242,7 @@ async function generateSessionDigest(snapshot) {
                 date: new Date().toISOString().slice(0, 10),
             });
             saveSession(sessionId, { digest, digestPending: false });
+            writeTranscript(sessionId, getSession(sessionId)?.events || [], digest);
             sendToRenderer('save-session-digest', { sessionId, digest });
         }
         sendToRenderer('digest-finished', { success: true });
@@ -1580,8 +1587,13 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         try {
             stopMacOSAudioCapture();
             levelTracker.reset();
-            // The thread reaches disk before anything else can fail or take time.
-            flushThreadSave();
+            // The thread is already on disk, event by event; what is written here is
+            // the readable transcript derived from it.
+            const closingCtx = sessionManager.getContext();
+            if (closingCtx) {
+                const { sessionId, events } = closingCtx.toJSON();
+                writeTranscript(sessionId, events);
+            }
 
             // Whatever the summary needs is taken now, while the session is still
             // open; the call itself runs detached so the button feels immediate.

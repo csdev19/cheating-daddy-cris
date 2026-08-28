@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { writeFileAtomic } = require('./core/atomic-file');
 const os = require('os');
 
 const CONFIG_VERSION = 1;
@@ -109,11 +110,9 @@ function readJsonFile(filePath, defaultValue) {
 // Helper to write JSON file safely
 function writeJsonFile(filePath, data) {
     try {
-        const dir = path.dirname(filePath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+        // Atomic: writing in place truncates first, so a crash mid-write used to
+        // destroy the whole file rather than lose the last change.
+        writeFileAtomic(filePath, JSON.stringify(data, null, 2));
         return true;
     } catch (error) {
         console.error(`Error writing ${filePath}:`, error.message);
@@ -400,15 +399,81 @@ function getModelForToday() {
 
 // ============ HISTORY ============
 
-function getSessionPath(sessionId) {
+// Legacy layout: one growing JSON per session, rewritten on every change.
+function getLegacySessionPath(sessionId) {
     return path.join(getHistoryDir(), `${sessionId}.json`);
 }
 
-function saveSession(sessionId, data) {
-    const sessionPath = getSessionPath(sessionId);
+// Current layout: a folder per session. Metadata is written atomically and rarely;
+// the thread is an append-only log; screenshots already lived here. Nothing that
+// grows is ever rewritten, so a crash cannot take the session with it (D26).
+function getSessionDir(sessionId) {
+    return path.join(getHistoryDir(), String(sessionId));
+}
 
-    // Load existing session to preserve metadata
-    const existingSession = readJsonFile(sessionPath, null);
+function getSessionMetaPath(sessionId) {
+    return path.join(getSessionDir(sessionId), 'session.json');
+}
+
+function getEventLogPath(sessionId) {
+    return path.join(getSessionDir(sessionId), 'events.jsonl');
+}
+
+function getTranscriptPath(sessionId) {
+    return path.join(getSessionDir(sessionId), 'transcript.md');
+}
+
+// One line, one event, appended the moment it happens. No debounce: the reason the
+// thread used to sit in memory for up to a second was that saving meant rewriting
+// the whole document.
+function appendSessionEvent(sessionId, event) {
+    try {
+        const { serializeEvent } = require('./core/event-log');
+        fs.mkdirSync(getSessionDir(sessionId), { recursive: true });
+        fs.appendFileSync(getEventLogPath(sessionId), serializeEvent(event), 'utf8');
+        return true;
+    } catch (error) {
+        console.error(`Error appending event to session ${sessionId}:`, error.message);
+        return false;
+    }
+}
+
+function readSessionEvents(sessionId) {
+    try {
+        const { parseEventLog } = require('./core/event-log');
+        if (!fs.existsSync(getEventLogPath(sessionId))) return [];
+
+        const { events, dropped } = parseEventLog(fs.readFileSync(getEventLogPath(sessionId), 'utf8'));
+        if (dropped > 0) {
+            console.warn(`Session ${sessionId}: ${dropped} unreadable line(s) skipped, probably a crash mid-write`);
+        }
+        return events;
+    } catch (error) {
+        console.error(`Error reading the event log for ${sessionId}:`, error.message);
+        return [];
+    }
+}
+
+function writeSessionTranscript(sessionId, markdown) {
+    try {
+        writeFileAtomic(getTranscriptPath(sessionId), markdown);
+        return true;
+    } catch (error) {
+        console.error(`Error writing the transcript for ${sessionId}:`, error.message);
+        return false;
+    }
+}
+
+// Saves the session metadata. The thread is NOT written here: events go to the
+// append-only log as they happen. `data.events` is still accepted so a legacy
+// session being migrated can be folded into the log once.
+function saveSession(sessionId, data) {
+    const metaPath = getSessionMetaPath(sessionId);
+    const existingSession = readJsonFile(metaPath, null) || readJsonFile(getLegacySessionPath(sessionId), null);
+
+    if (Array.isArray(data.events) && data.events.length > 0 && !fs.existsSync(getEventLogPath(sessionId))) {
+        for (const event of data.events) appendSessionEvent(sessionId, event);
+    }
 
     const sessionData = {
         sessionId,
@@ -417,21 +482,26 @@ function saveSession(sessionId, data) {
         // Profile context - set once when session starts
         profile: data.profile || existingSession?.profile || null,
         customPrompt: data.customPrompt || existingSession?.customPrompt || null,
-        // Single event thread (replaces conversationHistory + screenAnalysisHistory)
-        events: data.events || existingSession?.events || [],
         digest: data.digest ?? existingSession?.digest ?? null,
         // Marked when the summary call starts, cleared when it lands. A summary lost
         // to a crash is unfinished work, and this is what makes it findable (D24).
         digestPending: data.digestPending ?? existingSession?.digestPending ?? false,
         digestAttempts: data.digestAttempts ?? existingSession?.digestAttempts ?? 0,
     };
-    return writeJsonFile(sessionPath, sessionData);
+    return writeJsonFile(metaPath, sessionData);
 }
 
 function getSession(sessionId) {
-    const raw = readJsonFile(getSessionPath(sessionId), null);
+    const meta = readJsonFile(getSessionMetaPath(sessionId), null);
+    if (meta) {
+        return { ...meta, events: readSessionEvents(sessionId) };
+    }
+
+    // Sessions written before the folder layout, and before the single thread, are
+    // migrated as they are read. Nothing on disk is rewritten to do it.
+    const raw = readJsonFile(getLegacySessionPath(sessionId), null);
     if (!raw) return null;
-    // Sessions recorded before the single thread are migrated as they are read.
+
     const { migrateLegacySession } = require('./core/session-context-migrate');
     return { ...raw, ...migrateLegacySession(raw) };
 }
@@ -444,37 +514,34 @@ function getAllSessions() {
             return [];
         }
 
-        const files = fs
-            .readdirSync(historyDir)
-            .filter(f => f.endsWith('.json'))
-            .sort((a, b) => {
-                // Sort by timestamp descending (newest first)
-                const tsA = parseInt(a.replace('.json', ''));
-                const tsB = parseInt(b.replace('.json', ''));
-                return tsB - tsA;
-            });
+        // Both layouts live side by side: a folder per session now, and the flat
+        // JSON files written before. Neither is rewritten just to be listed.
+        const entries = fs.readdirSync(historyDir, { withFileTypes: true });
+        const ids = new Set();
+        for (const entry of entries) {
+            if (entry.isDirectory()) ids.add(entry.name);
+            else if (entry.name.endsWith('.json')) ids.add(entry.name.replace('.json', ''));
+        }
 
-        return files
-            .map(file => {
-                const sessionId = file.replace('.json', '');
-                const data = readJsonFile(path.join(historyDir, file), null);
-                if (data) {
-                    const { migrateLegacySession } = require('./core/session-context-migrate');
-                    const { events } = migrateLegacySession(data);
-                    return {
-                        sessionId,
-                        createdAt: data.createdAt,
-                        lastUpdated: data.lastUpdated,
-                        messageCount: events.filter(e => e.kind === 'speech').length,
-                        screenAnalysisCount: events.filter(e => e.kind === 'screen').length,
-                        profile: data.profileName || data.profile || null,
-                        hasDigest: Boolean(data.digest),
-                        digest: data.digest || null,
-                        digestPending: data.digestPending === true,
-                        digestAttempts: data.digestAttempts || 0,
-                    };
-                }
-                return null;
+        return [...ids]
+            .sort((a, b) => parseInt(b) - parseInt(a))
+            .map(sessionId => {
+                const session = getSession(sessionId);
+                if (!session) return null;
+
+                const events = session.events || [];
+                return {
+                    sessionId,
+                    createdAt: session.createdAt,
+                    lastUpdated: session.lastUpdated,
+                    messageCount: events.filter(e => e.kind === 'speech').length,
+                    screenAnalysisCount: events.filter(e => e.kind === 'screen').length,
+                    profile: session.profileName || session.profile || null,
+                    hasDigest: Boolean(session.digest),
+                    digest: session.digest || null,
+                    digestPending: session.digestPending === true,
+                    digestAttempts: session.digestAttempts || 0,
+                };
             })
             .filter(Boolean);
     } catch (error) {
@@ -484,15 +551,12 @@ function getAllSessions() {
 }
 
 function deleteSession(sessionId) {
-    const sessionPath = getSessionPath(sessionId);
     try {
-        // Thumbnails live in `history/<sessionId>/`: left behind, deleting a session
-        // would strand screenshots on disk.
-        require('./core/screenshots').deleteSessionScreenshots(getHistoryDir(), sessionId);
-        if (fs.existsSync(sessionPath)) {
-            fs.unlinkSync(sessionPath);
-            return true;
-        }
+        // The folder holds the metadata, the event log, the transcript and the
+        // screenshots; the legacy flat file may also still be there.
+        fs.rmSync(getSessionDir(sessionId), { recursive: true, force: true });
+        fs.rmSync(getLegacySessionPath(sessionId), { force: true });
+        return true;
     } catch (error) {
         console.error('Error deleting session:', error.message);
     }
@@ -503,12 +567,10 @@ function deleteAllSessions() {
     const historyDir = getHistoryDir();
     try {
         if (fs.existsSync(historyDir)) {
-            const { deleteSessionScreenshots } = require('./core/screenshots');
-            const files = fs.readdirSync(historyDir).filter(f => f.endsWith('.json'));
-            files.forEach(file => {
-                deleteSessionScreenshots(historyDir, file.replace('.json', ''));
-                fs.unlinkSync(path.join(historyDir, file));
-            });
+            // Removes both layouts: the folders and the legacy flat files.
+            for (const entry of fs.readdirSync(historyDir, { withFileTypes: true })) {
+                fs.rmSync(path.join(historyDir, entry.name), { recursive: true, force: true });
+            }
         }
         return true;
     } catch (error) {
@@ -562,6 +624,10 @@ module.exports = {
 
     // History
     getHistoryDir,
+    getSessionDir,
+    appendSessionEvent,
+    readSessionEvents,
+    writeSessionTranscript,
     saveSession,
     getSession,
     getAllSessions,
