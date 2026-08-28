@@ -542,6 +542,25 @@ input, and the project is consolidating towards one provider rather than spreadi
 across eleven. The decision does not change; one of its arguments no longer holds
 and should not be cited.
 
+**Two macOS consequences that only appear on upgrading, neither of them bugs:**
+
+1. **The native screen-share picker starts appearing.** `setDisplayMediaRequestHandler`
+   has carried `useSystemPicker: true` since upstream added it in 2025. Electron 30
+   ignored it; Electron 44 honours it on macOS 15+, and per Electron's docs "if the
+   system picker is available and `useSystemPicker` is set to `true`, the handler
+   will not be invoked" — macOS shows its own dialog instead. For an overlay meant
+   to go unnoticed that is a prompt on every session, visible to everyone if the
+   screen is already being shared. The flag is now explicitly `false`, restoring the
+   silent whole-screen capture.
+
+2. **Screen Recording permission is requested again.** The development Electron
+   bundle is ad-hoc signed (`Identifier=Electron`, no team identifier), so macOS
+   keys the permission to that specific binary. A new Electron version is a new
+   binary, so the grant does not carry over. Launched from a terminal, macOS
+   attributes the request to the ancestor process, which is why the prompt names the
+   terminal rather than the app. One-time, and only in development — a packaged,
+   signed build has a stable identity.
+
 **What this changes about D26 (storage):** `node:sqlite` is now available with no
 new dependency. It still is not adopted, and the reason is no longer availability
 but fit: for appending events and reading one session whole, an append-only log

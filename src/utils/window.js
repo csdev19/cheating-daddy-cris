@@ -39,7 +39,13 @@ function createWindow(sendToRenderer, geminiSessionRef) {
                 callback({ video: sources[0], audio: 'loopback' });
             });
         },
-        { useSystemPicker: true }
+        // The system picker stays off deliberately. It is macOS 15+ only and, when
+        // available, Electron does not invoke the handler at all — macOS shows its
+        // own "Share a Window or Entire Screen" dialog instead. For an overlay meant
+        // to go unnoticed that is a dialog on every session, visible to everyone if
+        // the screen is already being shared. Electron 30 ignored this flag, so the
+        // behaviour only surfaced on upgrading to 44 (D27).
+        { useSystemPicker: false }
     );
 
     mainWindow.setContentProtection(true);
