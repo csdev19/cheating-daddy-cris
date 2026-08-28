@@ -412,3 +412,47 @@ not be flagged.
 **What this does not do:** it is not acoustic echo cancellation. With headphones
 the problem does not arise at all, which is what D18 already says; this only
 cleans up what leaks through when there are none.
+
+---
+
+## D24 — The session summary runs detached from the close
+
+**Decision:** `close-session` stops the audio, flushes the thread to disk, takes a
+snapshot of what the summary needs, ends the session and returns. The model call
+runs afterwards, unawaited, reporting itself through a `digest-started` /
+`digest-finished` pair that the UI shows as an indicator.
+
+**Why:** the summary is a full model call over the whole transcript. Measured with
+`gemini-2.5-flash`: 8 s and 25 s on two runs, and 67 s once. The UI awaited it
+before switching views, with no spinner and no message, so ending a session looked
+like the app had frozen.
+
+**Why a snapshot:** the call outlives the session. Reading `sessionManager` when it
+finishes would be reading whatever session is open by then, and the old code's
+`finally { sessionManager.end() }` would have wiped a session the person had
+already started.
+
+**What is given up:** quitting the app during those seconds loses that summary. The
+thread itself is never at risk — it reaches disk before the call starts.
+
+---
+
+## D25 — Filtering hallucinations: what is done and what is deliberately not
+
+**Decision:** drop segments the model flags as non-speech (`no_speech_prob >= 0.6`),
+known junk phrases, and segments that are nothing but a tag or a sound effect —
+`[BLANK_AUDIO]`, `(music)`, `*Boo*`, `*sniff*`.
+
+**Considered and not done, pending evidence from real use:**
+
+- **Dropping on low language-detection confidence.** In a real session the junk came
+  back at p=0.44 and p=0.24 while good speech sat at p=0.98, so the signal is there.
+  Not adopted yet because a short but genuine segment also scores low, and dropping
+  it loses real speech silently — the same reason echoes are flagged rather than
+  deleted (D23).
+- **Pinning the session language instead of autodetecting.** It would remove the
+  spurious jumps to Russian outright, but D4 chose a multilingual model precisely so
+  the language is not hardwired, and it would break a bilingual meeting.
+
+Both are recorded rather than implemented so the current filter can be judged on
+real sessions first.

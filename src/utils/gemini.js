@@ -183,16 +183,29 @@ const sessionManager = createSessionManager({
 
 // D17: closes the loop between meetings. The summary is appended to the profile's
 // history, and the next session on that profile loads it as one more note.
-async function generateSessionDigest() {
+// Takes everything the summary needs before the session is closed, so it can run
+// after the fact without touching live state. Returns null when there is too little
+// to be worth a call.
+function snapshotForDigest() {
     const ctx = sessionManager.getContext();
     const profile = sessionManager.getProfile();
-    if (!ctx || !profile) return;
+    if (!ctx || !profile) return null;
 
     const transcript = ctx.getTranscript();
-    if (transcript.length <= 200) {
-        sessionManager.end();
-        return;
-    }
+    if (transcript.length <= 200) return null;
+
+    return { transcript, profile, sessionId: ctx.toJSON().sessionId };
+}
+
+// Runs detached from the close: an 8-25s model call is too long to freeze the UI
+// behind (D24). It works on the snapshot, never on `sessionManager`, because by the
+// time it finishes the person may already be in a new session — ending that one
+// from here would wipe it.
+async function generateSessionDigest(snapshot) {
+    if (!snapshot) return;
+
+    const { transcript, profile, sessionId } = snapshot;
+    sendToRenderer('digest-started');
 
     try {
         const { buildDigestPrompt, appendDigest } = require('../core/digest');
@@ -215,12 +228,12 @@ async function generateSessionDigest() {
                 digest,
                 date: new Date().toISOString().slice(0, 10),
             });
-            sendToRenderer('save-session-digest', { sessionId: ctx.toJSON().sessionId, digest });
+            sendToRenderer('save-session-digest', { sessionId, digest });
         }
+        sendToRenderer('digest-finished', { success: true });
     } catch (error) {
         console.error('Could not generate the session summary:', error);
-    } finally {
-        sessionManager.end();
+        sendToRenderer('digest-finished', { success: false, error: error.message });
     }
 }
 
@@ -1501,10 +1514,21 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         try {
             stopMacOSAudioCapture();
             levelTracker.reset();
-            // Generating the summary ends the session, so the thread is saved before
-            // the context is emptied.
+            // The thread reaches disk before anything else can fail or take time.
             flushThreadSave();
-            await generateSessionDigest();
+
+            // Whatever the summary needs is taken now, while the session is still
+            // open; the call itself runs detached so the button feels immediate.
+            const snapshot = snapshotForDigest();
+            sessionManager.end();
+            generateSessionDigest(snapshot);
+
+            // Local transcription runs whenever the transcription axis says so, which
+            // is independent of the provider. Branching on the provider left
+            // whisper-server alive after every session, one process per session.
+            if (currentModes.transcription === 'local-whisper') {
+                getLocalAi().closeLocalSession();
+            }
 
             if (currentProviderMode === 'cloud') {
                 closeCloud();
@@ -1514,7 +1538,6 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
             }
 
             if (currentProviderMode === 'local') {
-                getLocalAi().closeLocalSession();
                 currentProviderMode = 'byok';
                 closeTransportLog();
                 return { success: true };

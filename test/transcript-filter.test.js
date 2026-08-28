@@ -79,3 +79,19 @@ test('the threshold is exposed and is the documented 0.6', () => {
     assert.strictEqual(cleanTranscription([{ text: 'Edge.', no_speech_prob: 0.6 }]), '');
     assert.strictEqual(cleanTranscription([{ text: 'Edge.', no_speech_prob: 0.59 }]), 'Edge.');
 });
+
+// Seen in a real session: Whisper writes sound effects between asterisks.
+test('drops segments that are only a sound effect between asterisks', () => {
+    const text = cleanTranscription([
+        { text: '*Boo*', no_speech_prob: 0.0 },
+        { text: '*sniff*', no_speech_prob: 0.0 },
+        { text: 'Real words.', no_speech_prob: 0.0 },
+    ]);
+
+    assert.strictEqual(text, 'Real words.');
+});
+
+test('an asterisk inside a real sentence is not junk', () => {
+    const text = cleanTranscription([{ text: 'The regex is a star, like *.js there.', no_speech_prob: 0.0 }]);
+    assert.strictEqual(text, 'The regex is a star, like *.js there.');
+});

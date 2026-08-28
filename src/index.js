@@ -55,6 +55,10 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
     stopMacOSAudioCapture();
+    // On macOS the app stays alive with no windows, so quitting is not what stops
+    // the local servers here: with no window there is no session, and leaving
+    // whisper-server running holds ~1.7 GB per process.
+    require('./utils/localai').closeLocalSession();
     if (process.platform !== 'darwin') {
         app.quit();
     }

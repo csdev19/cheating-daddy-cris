@@ -371,6 +371,39 @@ export class CheatingDaddyApp extends LitElement {
             white-space: nowrap;
         }
 
+        .digest-pill {
+            position: absolute;
+            bottom: var(--space-md);
+            right: var(--space-md);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px var(--space-md);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: var(--font-size-xs);
+            white-space: nowrap;
+        }
+
+        .digest-spinner {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 1.5px solid var(--border-strong);
+            border-top-color: var(--accent);
+            animation: digest-spin 0.7s linear infinite;
+        }
+
+        @keyframes digest-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
         .end-session {
             display: flex;
             align-items: center;
@@ -543,6 +576,7 @@ export class CheatingDaddyApp extends LitElement {
         threadEvents: { type: Array },
         availableProfiles: { type: Array },
         toast: { state: true },
+        digestSaving: { state: true },
         selectedScreenshotInterval: { type: String },
         selectedImageQuality: { type: String },
         layoutMode: { type: String },
@@ -574,6 +608,7 @@ export class CheatingDaddyApp extends LitElement {
         this.threadEvents = [];
         this.availableProfiles = [];
         this.toast = null;
+        this.digestSaving = false;
         this.pendingAsk = null;
         this.captureState = { mic: false, system: false };
         this.audioLevels = { them: 0, me: 0 };
@@ -647,6 +682,15 @@ export class CheatingDaddyApp extends LitElement {
                 this.streamingAnswer = '';
             });
             ipcRenderer.on('thread-event', (_, event) => this.appendThreadEvent(event));
+            // The summary runs detached from the close, so the only sign it is
+            // happening is this indicator (D24).
+            ipcRenderer.on('digest-started', () => {
+                this.digestSaving = true;
+            });
+            ipcRenderer.on('digest-finished', (_, result) => {
+                this.digestSaving = false;
+                if (!result?.success) this.addNotice(`The session summary could not be saved: ${result?.error || 'unknown error'}`);
+            });
             ipcRenderer.on('echo-detected', () => {
                 this.addNotice('Your microphone is picking up the system audio. Use headphones and the duplicate turns will stop.');
             });
@@ -757,6 +801,7 @@ export class CheatingDaddyApp extends LitElement {
         clearTimeout(this._toastTimer);
         this._toastTimer = setTimeout(() => {
             this.toast = null;
+            this.digestSaving = false;
         }, 6000);
     }
 
@@ -849,6 +894,7 @@ export class CheatingDaddyApp extends LitElement {
         this.threadEvents = [];
         this.availableProfiles = [];
         this.toast = null;
+        this.digestSaving = false;
         this.pendingAsk = null;
         this.captureState = { mic: false, system: false };
         this.audioLevels = { them: 0, me: 0 };

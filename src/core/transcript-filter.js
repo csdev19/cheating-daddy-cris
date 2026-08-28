@@ -11,9 +11,11 @@ const NO_SPEECH_THRESHOLD = 0.6;
 const JUNK_PATTERNS = [
     /thank you for watching/i,
     /subt[ií]tulos/i,
-    // A segment that is nothing but a bracketed tag: [BLANK_AUDIO], (music)...
+    // A segment that is nothing but a tag or a sound effect: [BLANK_AUDIO],
+    // (music), *Boo*, *sniff* — none of them are things anybody said.
     /^\s*\[[^\]]*\]\s*$/,
     /^\s*\([^)]*\)\s*$/,
+    /^\s*\*[^*]*\*\s*$/,
 ];
 
 function isJunk(text) {
