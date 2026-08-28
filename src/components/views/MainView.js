@@ -700,6 +700,8 @@ export class MainView extends LitElement {
         _openaiKey: { state: true },
         _geminiLiveModel: { state: true },
         _geminiModel: { state: true },
+        _captureDisplayId: { state: true },
+        _displays: { state: true },
         _groqModel: { state: true },
         _groqImageModel: { state: true },
         _disableGroqThinking: { state: true },
@@ -730,6 +732,8 @@ export class MainView extends LitElement {
         this._openaiKey = '';
         this._geminiLiveModel = 'gemini-3.1-flash-live-preview';
         this._geminiModel = 'gemini-2.5-flash';
+        this._captureDisplayId = 'auto';
+        this._displays = [];
         this._groqModel = 'qwen/qwen3.6-27b';
         this._groqImageModel = 'qwen/qwen3.6-27b';
         this._disableGroqThinking = true;
@@ -771,6 +775,10 @@ export class MainView extends LitElement {
             this._openaiKey = creds.openaiKey || '';
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
             this._geminiModel = config.geminiModel || 'gemini-2.5-flash';
+            this._captureDisplayId = prefs.captureDisplayId || 'auto';
+            cheatingDaddy.listDisplays().then(displays => {
+                this._displays = displays;
+            });
             this._groqModel = config.groqModel || 'qwen/qwen3.6-27b';
             this._groqImageModel = config.groqImageModel || 'qwen/qwen3.6-27b';
             this._disableGroqThinking = config.disableGroqThinking === true;
@@ -951,6 +959,12 @@ export class MainView extends LitElement {
     async _saveGeminiLiveModel(val) {
         this._geminiLiveModel = val;
         await cheatingDaddy.storage.updateConfig('geminiLiveModel', val);
+        this.requestUpdate();
+    }
+
+    async _saveCaptureDisplay(val) {
+        this._captureDisplayId = val;
+        await cheatingDaddy.storage.updatePreference('captureDisplayId', val);
         this.requestUpdate();
     }
 
@@ -1200,6 +1214,24 @@ export class MainView extends LitElement {
                         <label class="form-label">Gemini Model</label>
                         <input type="text" .value=${this._geminiModel} @input=${e => this._saveGeminiModel(e.target.value)} />
                         <div class="form-hint">Used to answer. Must support generateContent.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Screen to capture</label>
+                        <select .value=${this._captureDisplayId} @change=${e => this._saveCaptureDisplay(e.target.value)}>
+                            <option value="auto" ?selected=${this._captureDisplayId === 'auto'}>Automatic (primary display)</option>
+                            ${this._displays.map(
+                                d => html`
+                                    <option value=${d.displayId} ?selected=${this._captureDisplayId === d.displayId}>
+                                        ${d.name}${d.isPrimary ? ' — primary' : ''}
+                                    </option>
+                                `
+                            )}
+                        </select>
+                        <div class="form-hint">
+                            Chosen once, never asked at session start. If the chosen screen is not connected, the primary one is used and you are
+                            told.
+                        </div>
                     </div>
                 </div>
             </details>

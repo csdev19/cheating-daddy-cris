@@ -20,6 +20,15 @@ it on the next launch. The cost is continuous audio writes for the whole meeting
 and real recovery logic. Deliberately deferred: at 12 s the exposure is small, and
 the transcript of everything already spoken is safe.
 
+### Code signing with a Developer ID
+
+`appBundleId` is set, so the packaged app's `Info.plist` carries
+`com.csdev19.screen-assistant`. But the build is ad-hoc signed and `codesign -dv`
+still reports `com.github.Electron`, so the identity macOS sees is not consistent
+end to end. Fixing it means enabling `osxSign` in `forge.config.js` with a real
+Developer ID, and notarisation after that. Until then, permission grants are less
+stable than they look. See D29.
+
 ### Context preview before starting a session (M3)
 
 From the audit. Before starting, show which profile, which `context/` files and how

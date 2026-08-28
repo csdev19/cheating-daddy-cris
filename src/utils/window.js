@@ -36,7 +36,17 @@ function createWindow(sendToRenderer, geminiSessionRef) {
     session.defaultSession.setDisplayMediaRequestHandler(
         (request, callback) => {
             desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
-                callback({ video: sources[0], audio: 'loopback' });
+                const { chooseCaptureSource } = require('../core/display-choice');
+                const { source, fellBack } = chooseCaptureSource(sources, {
+                    preferredDisplayId: storage.getPreferences().captureDisplayId,
+                    primaryDisplayId: screen.getPrimaryDisplay().id,
+                });
+
+                if (fellBack) {
+                    sendToRenderer('capture-display-fallback');
+                }
+
+                callback({ video: source || sources[0], audio: 'loopback' });
             });
         },
         // The system picker stays off deliberately. It is macOS 15+ only and, when
@@ -338,6 +348,28 @@ function setupWindowIpcHandlers(mainWindow, sendToRenderer, geminiSessionRef) {
     // Opacity rather than hide(): an always-on-top panel that hides and shows again
     // on macOS can steal focus, and losing focus mid-meeting is worse than the
     // problem being solved.
+    // The screen list for the settings dropdown. Enumerated on demand so plugging a
+    // monitor in does not need a restart to show up.
+    ipcMain.handle('list-displays', async () => {
+        try {
+            const { desktopCapturer } = require('electron');
+            const sources = await desktopCapturer.getSources({ types: ['screen'] });
+            const primaryId = String(screen.getPrimaryDisplay().id);
+
+            return {
+                success: true,
+                data: sources.map(source => ({
+                    displayId: String(source.display_id),
+                    name: source.name,
+                    isPrimary: String(source.display_id) === primaryId,
+                })),
+            };
+        } catch (error) {
+            console.error('Could not list the displays:', error);
+            return { success: false, error: error.message, data: [] };
+        }
+    });
+
     ipcMain.handle('window-step-aside', () => {
         try {
             mainWindow?.setOpacity(0);

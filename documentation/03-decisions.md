@@ -610,3 +610,52 @@ hoists dependencies to the repo root, so packaging from inside a workspace needs
 work that has not been done or tested. And the shared catalog pins TypeScript, vite
 and tailwind, none of which this project uses by decision (D19). It becomes worth
 doing when a second consumer of `core` exists.
+
+---
+
+## D29 — The capture screen is a setting, and the app has its own identifier
+
+**Decision:** which screen screenshots come from is chosen once in preferences
+(`captureDisplayId`, default `auto` = primary display). The packaged app declares
+`appBundleId: com.csdev19.screen-assistant`.
+
+### The screen selector
+
+**Why a setting and not a picker:** D27 turned off macOS's native picker because it
+interrupts every session with a dialog everyone in the call can see. Replacing it
+with our own dialog would repeat the mistake. The choice is made once, in settings,
+and never asked again.
+
+**When the chosen screen is gone** — an external monitor left at home — the capture
+falls back to the primary display **and says so**. Capturing a different screen in
+silence would be worse than the problem the setting exists to solve, and refusing to
+capture would fail at the exact moment the shortcut is pressed.
+
+**One detail that silently breaks this:** `desktopCapturer` reports `display_id` as
+a string while `screen` reports `id` as a number. Compared raw they never match, and
+every choice would look like a missing display. `core/display-choice.js` normalises
+both and has a test for it.
+
+**Not verified with hardware:** the development machine has one display. The logic is
+covered by tests; the two-monitor behaviour has not been observed.
+
+### The bundle identifier
+
+macOS keys Screen Recording and Microphone permission to an app's identity. Without
+`appBundleId` the packaged app inherits Electron's default, so the grant is tied to
+something generic.
+
+**Verified:** the packaged app's `Info.plist` now reads
+`CFBundleIdentifier: com.csdev19.screen-assistant`.
+
+**What this does not fix, stated plainly:**
+
+1. **Development still prompts on every Electron upgrade.** In development the app
+   runs from `node_modules` with the identifier `Electron`, which no configuration
+   changes. This only affects the packaged app.
+2. **The code signature still says `com.github.Electron`.** The build is ad-hoc
+   signed, and `codesign -dv` reports the generic identifier even though the
+   Info.plist is correct. Making the identity consistent end to end needs real
+   signing through `osxSign`, which is commented out in `forge.config.js`.
+
+So `appBundleId` is necessary but not sufficient. It is the half that costs nothing.
