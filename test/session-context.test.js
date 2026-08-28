@@ -102,3 +102,24 @@ test('survives a JSON round-trip', () => {
 test('requires a sessionId', () => {
     assert.throws(() => createSessionContext({}), /sessionId/);
 });
+
+// A turn the microphone echoed off the speakers is kept in the thread so the person
+// can see it happened, but it must not reach the model: the same words are already
+// there from the system channel, and duplicating them skews what the model thinks
+// was said (D23).
+test('an echoed turn is stored but stays out of the transcript', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'them', text: 'How would you handle a deadlock?' });
+    ctx.addSpeech({ speaker: 'me', text: 'How would you handle a deadlock', echo: true });
+    ctx.addSpeech({ speaker: 'me', text: 'I would check the pool logs.' });
+
+    assert.strictEqual(ctx.getEvents().length, 3, 'nothing is thrown away');
+    assert.strictEqual(ctx.getTranscript(), '[Them]: How would you handle a deadlock?\n[Me]: I would check the pool logs.');
+});
+
+test('a speech event carries no echo flag unless it is set', () => {
+    const ctx = newContext();
+    ctx.addSpeech({ speaker: 'me', text: 'Just me talking.' });
+
+    assert.strictEqual(ctx.getEvents()[0].echo, false);
+});

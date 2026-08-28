@@ -40,6 +40,10 @@ const DEFAULT_PREFERENCES = {
     googleSearchEnabled: false,
     localLlmModel: 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M',
     whisperModel: 'large-v3-turbo',
+    // How long a single stretch of speech can run before it is cut and transcribed
+    // anyway. Whisper works in 30 s windows, so anything under that costs one pass;
+    // lower means you see text sooner and more sentences get split. See D22.
+    maxSegmentSeconds: 12,
 };
 
 const DEFAULT_KEYBINDS = null; // null means use system defaults

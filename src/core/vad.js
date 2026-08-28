@@ -19,13 +19,15 @@ function calculateRms(pcm16Buffer) {
 
 // One independent VAD per audio channel. State lives in the closure rather than in
 // the module so the system channel and the microphone cannot trample each other (D6).
-function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2, onSpeechEnd } = {}) {
+function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2, maxSegmentFrames = 0, cutSearchFrames = 10, onSpeechEnd } = {}) {
     if (typeof onSpeechEnd !== 'function') {
         throw new TypeError('createVad requires an onSpeechEnd callback');
     }
 
     let isSpeaking = false;
     let speechBuffers = [];
+    // RMS of each buffered frame, so a forced cut can look for a micro-pause.
+    let speechLevels = [];
     let preRoll = [];
     let speechFrameCount = 0;
     let silenceFrameCount = 0;
@@ -33,15 +35,28 @@ function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2,
     function reset() {
         isSpeaking = false;
         speechBuffers = [];
+        speechLevels = [];
         preRoll = [];
         speechFrameCount = 0;
         silenceFrameCount = 0;
     }
 
+    // Cutting mid-syllable is what degrades the words either side of the boundary,
+    // so the cut looks back over the last frames and lands on the quietest one.
+    function quietestCutIndex() {
+        const from = Math.max(0, speechLevels.length - cutSearchFrames);
+        let best = speechLevels.length - 1;
+        for (let i = from; i < speechLevels.length; i++) {
+            if (speechLevels[i] < speechLevels[best]) best = i;
+        }
+        return best;
+    }
+
     function process(pcm16kBuffer) {
         if (!pcm16kBuffer || pcm16kBuffer.length === 0) return;
 
-        const isVoice = calculateRms(pcm16kBuffer) > mode.energyThreshold;
+        const level = calculateRms(pcm16kBuffer);
+        const isVoice = level > mode.energyThreshold;
 
         if (isVoice) {
             speechFrameCount += 1;
@@ -64,12 +79,13 @@ function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2,
                 // Trim the trailing silence that triggered the close, keeping a short
                 // tail. Sending 3s of silence to Whisper wastes compute and is where it
                 // hallucinates most (B3); the tail avoids clipping the final word.
-                const silencioAcumulado = silenceFrameCount - 1;
-                const aDescartar = Math.max(0, silencioAcumulado - tailFrames);
-                const utiles = aDescartar > 0 ? speechBuffers.slice(0, speechBuffers.length - aDescartar) : speechBuffers;
+                const trailingSilence = silenceFrameCount - 1;
+                const toDrop = Math.max(0, trailingSilence - tailFrames);
+                const useful = toDrop > 0 ? speechBuffers.slice(0, speechBuffers.length - toDrop) : speechBuffers;
 
-                const audioData = Buffer.concat(utiles);
+                const audioData = Buffer.concat(useful);
                 speechBuffers = [];
+                speechLevels = [];
                 onSpeechEnd(audioData);
                 return;
             }
@@ -79,6 +95,22 @@ function createVad({ mode = VAD_MODES.NORMAL, preRollFrames = 3, tailFrames = 2,
 
         if (isSpeaking) {
             speechBuffers.push(frame);
+            speechLevels.push(level);
+
+            // Someone who talks without pausing would otherwise see nothing at all
+            // until they stopped. The segment is closed on length too, and what
+            // falls after the cut starts the next one so no audio is lost.
+            //
+            // Only voice frames can trip it: during trailing silence the buffer keeps
+            // growing, and a forced cut there would ship pure silence to Whisper,
+            // which is exactly where it hallucinates (B3).
+            if (isVoice && maxSegmentFrames > 0 && speechBuffers.length >= maxSegmentFrames) {
+                const cutAt = quietestCutIndex();
+                const audioData = Buffer.concat(speechBuffers.slice(0, cutAt + 1));
+                speechBuffers = speechBuffers.slice(cutAt + 1);
+                speechLevels = speechLevels.slice(cutAt + 1);
+                onSpeechEnd(audioData);
+            }
         } else if (preRollFrames > 0) {
             preRoll.push(frame);
             if (preRoll.length > preRollFrames) preRoll.shift();

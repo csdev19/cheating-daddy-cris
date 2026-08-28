@@ -348,3 +348,67 @@ ground levelled, three things decide it, in this order:
 below ~4 s, and a readable transcript with a non-native accent. If it fails, the
 first remedy is changing model (`medium.en`) or recompiling the binary — **not**
 changing architecture. Only if both fail is `gemini-live` reconsidered.
+
+---
+
+# Decisions from the first real sessions (2026-08-28)
+
+## D22 — A stretch of speech is cut on length, and the length is a setting
+
+**Decision:** close a segment after `maxSegmentSeconds` of continuous speech even
+with no pause, cutting at the quietest frame of the last second. Default 12 s,
+editable in preferences.
+
+**Why:** the VAD only closed on 2 s of silence, so talking for five minutes
+straight produced no text at all for five minutes and then a wall of it. Measured
+on an M4 Pro with `large-v3-turbo` and Metal:
+
+| Audio | Transcription | Ratio |
+| ----- | ------------- | ----- |
+| 3 s   | 1.08 s        | —     |
+| 10 s  | 1.13 s        | —     |
+| 27 s  | 1.30 s        | 20x   |
+| 60 s  | 2.85 s        | 21x   |
+| 120 s | 4.86 s        | 25x   |
+| 300 s | 11.5 s        | 26x   |
+
+Two things follow. Whisper is not the bottleneck — it runs at ~25x real time, so
+B10 is answered: the binary does accelerate. And the cost is flat below ~27 s
+because Whisper works in 30 s windows, so a chunk under that costs a single pass.
+Ten chunks of 30 s cost the same total compute as one 5-minute call, but the words
+appear while the person is still talking.
+
+**Why it is a setting:** the right value depends on how someone speaks and on how
+much they mind split sentences. It is meant to be tuned, not guessed once.
+
+**Cut point:** the quietest frame within the last second, so the cut lands on a
+micro-pause rather than mid-syllable, which is what degrades the words either side
+of a boundary. Only a voice frame can trip the cap: forcing a cut during trailing
+silence would ship pure silence to Whisper, which is where it hallucinates (B3).
+
+---
+
+## D23 — An echoed turn is flagged, never deleted
+
+**Decision:** when a microphone turn closely matches something the system channel
+transcribed in the last 15 s, mark it `echo: true`. It stays in the thread, shown
+collapsed, and is excluded from the transcript the model reads. A one-off notice
+explains the cause.
+
+**Why not delete it:** repeating a question back is ordinary conversation — "and
+how was your day?" — and a similarity threshold cannot tell that apart from an
+echo with confidence. Deleting would lose something the person actually said, with
+no way for them to notice. Marking makes a false positive harmless.
+
+**Why exclude it from the transcript:** the same words are already there from the
+system channel. Sending them twice skews what the model believes was said, and who
+said it.
+
+**Similarity measure:** Dice coefficient over word multisets, threshold 0.85, with
+a five-word floor. Intersection-over-smaller was rejected because it scores a
+subset as a perfect match, which is exactly the repeated-question case that must
+not be flagged.
+
+**What this does not do:** it is not acoustic echo cancellation. With headphones
+the problem does not arise at all, which is what D18 already says; this only
+cleans up what leaks through when there are none.

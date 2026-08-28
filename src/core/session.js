@@ -1,6 +1,7 @@
 const { createSessionContext } = require('./session-context');
 const { getProfilesDir, loadProfile } = require('./profiles');
 const { buildPayload } = require('./payload');
+const { createEchoDetector } = require('./echo-filter');
 
 // Joins the context thread, the profile and the provider. `sendToProvider` is
 // injected: it is the seam that lets the provider change without touching the
@@ -12,6 +13,9 @@ function createSessionManager({ configDir, sendToProvider, onEvent = null, now =
     let context = null;
     let profile = null;
     let pending = false;
+    // Without headphones the mic re-records the speakers; the duplicate is flagged
+    // rather than deleted, and kept out of what the model reads (D23).
+    const echoDetector = createEchoDetector({ now });
 
     // The single exit point for thread events. The view subscribes here instead of
     // polling the context, and a rendering failure never takes the session down.
@@ -28,12 +32,17 @@ function createSessionManager({ configDir, sendToProvider, onEvent = null, now =
     function start({ profileName, sessionId = String(now()) }) {
         profile = loadProfile(getProfilesDir(configDir), profileName);
         context = createSessionContext({ sessionId, profileName, now });
+        echoDetector.reset();
         return { sessionId, profile };
     }
 
     function recordSpeech(speaker, text) {
         if (!context) return null;
-        return emit(context.addSpeech({ speaker, text }));
+
+        const { isEcho } = echoDetector.check(speaker, text);
+        echoDetector.remember(speaker, text);
+
+        return emit(context.addSpeech({ speaker, text, echo: isEcho }));
     }
 
     function recordScreen(imageRef, caption = null) {
@@ -58,6 +67,7 @@ function createSessionManager({ configDir, sendToProvider, onEvent = null, now =
     }
 
     function end() {
+        echoDetector.reset();
         context = null;
         profile = null;
         pending = false;

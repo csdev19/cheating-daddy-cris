@@ -30,14 +30,18 @@ function projectThread(events, { mergeWindowMs = DEFAULT_MERGE_WINDOW_MS, attach
             const text = (event.text || '').trim();
             if (!text) continue;
 
+            const isEcho = event.echo === true;
             const last = rows[rows.length - 1];
-            const continuesTurn = last && last.kind === 'speech' && last.speaker === event.speaker && event.t - last.tEnd <= mergeWindowMs;
+            // An echoed fragment never merges into a real turn, or the marking would
+            // disappear inside legitimate text (D23).
+            const continuesTurn =
+                last && last.kind === 'speech' && last.speaker === event.speaker && last.echo === isEcho && event.t - last.tEnd <= mergeWindowMs;
 
             if (continuesTurn) {
                 last.text = `${last.text} ${text}`;
                 last.tEnd = event.t;
             } else {
-                rows.push({ id: `speech-${event.t}-${i}`, kind: 'speech', speaker: event.speaker, t: event.t, tEnd: event.t, text });
+                rows.push({ id: `speech-${event.t}-${i}`, kind: 'speech', speaker: event.speaker, t: event.t, tEnd: event.t, text, echo: isEcho });
                 pendingScreenRow = -1;
             }
             continue;

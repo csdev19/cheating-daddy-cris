@@ -18,13 +18,13 @@ function createSessionContext({ sessionId, profileName = null, now = Date.now, e
         return event;
     }
 
-    function addSpeech({ speaker, text, t }) {
+    function addSpeech({ speaker, text, echo = false, t }) {
         if (!SPEAKERS.includes(speaker)) {
             throw new TypeError(`speaker must be 'them' or 'me', got: ${speaker}`);
         }
         const clean = (text || '').trim();
         if (!clean) return null;
-        return push({ t: t ?? now(), kind: 'speech', speaker, text: clean });
+        return push({ t: t ?? now(), kind: 'speech', speaker, text: clean, echo: echo === true });
     }
 
     function addScreen({ imageRef, caption = null, t }) {
@@ -46,10 +46,14 @@ function createSessionContext({ sessionId, profileName = null, now = Date.now, e
     }
 
     function getTranscript() {
-        return thread
-            .filter(e => e.kind === 'speech')
-            .map(e => `[${SPEAKER_LABELS[e.speaker]}]: ${e.text}`)
-            .join('\n');
+        return (
+            thread
+                // Echoed turns stay in the thread for the person to see, but the model
+                // must not read the same words twice (D23).
+                .filter(e => e.kind === 'speech' && !e.echo)
+                .map(e => `[${SPEAKER_LABELS[e.speaker]}]: ${e.text}`)
+                .join('\n')
+        );
     }
 
     function getChecklistState() {

@@ -221,3 +221,50 @@ test('the manager works with no onEvent at all', () => {
 
     assert.doesNotThrow(() => manager.recordSpeech('them', 'Hello'));
 });
+
+// Without headphones the mic re-records the speakers, so the same words arrive on
+// both channels. The manager marks the second one instead of deleting it (D23).
+test('a mic turn echoing the speakers is flagged, not dropped', () => {
+    const seen = [];
+    const manager = createSessionManager({
+        configDir: makeConfigDir(),
+        sendToProvider: async () => 'ok',
+        onEvent: e => seen.push(e),
+    });
+    manager.start({ profileName: 'interview', sessionId: 's1' });
+
+    manager.recordSpeech('them', 'I met her on the way to Chicago where she was all alone');
+    manager.recordSpeech('me', 'I met her on the way to Chicago where she was all alone');
+
+    assert.strictEqual(seen.length, 2, 'both turns are recorded');
+    assert.strictEqual(seen[0].echo, false);
+    assert.strictEqual(seen[1].echo, true);
+    // The model reads the system channel only, so the words appear once.
+    assert.strictEqual(manager.getContext().getTranscript(), '[Them]: I met her on the way to Chicago where she was all alone');
+});
+
+test('a genuine reply is not mistaken for an echo', () => {
+    const seen = [];
+    const manager = createSessionManager({
+        configDir: makeConfigDir(),
+        sendToProvider: async () => 'ok',
+        onEvent: e => seen.push(e),
+    });
+    manager.start({ profileName: 'interview', sessionId: 's1' });
+
+    manager.recordSpeech('them', 'so tell me about your experience with Node');
+    manager.recordSpeech('me', 'I have about five years of backend work with Node');
+
+    assert.strictEqual(seen[1].echo, false);
+});
+
+test('starting a new session forgets the previous audio', () => {
+    const manager = createSessionManager({ configDir: makeConfigDir(), sendToProvider: async () => 'ok' });
+    manager.start({ profileName: 'interview', sessionId: 's1' });
+    manager.recordSpeech('them', 'I met her on the way to Chicago where she was all alone');
+
+    manager.start({ profileName: 'interview', sessionId: 's2' });
+    const event = manager.recordSpeech('me', 'I met her on the way to Chicago where she was all alone');
+
+    assert.strictEqual(event.echo, false);
+});

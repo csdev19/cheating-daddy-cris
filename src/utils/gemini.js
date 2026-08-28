@@ -28,6 +28,9 @@ let currentProviderMode = 'byok';
 // transcription axis from here; `currentProviderMode` only speaks for the provider.
 let currentModes = { transcription: 'local-whisper', reasoning: 'gemini' };
 
+// The headphones warning fires once per session, not on every duplicated turn.
+let echoWarned = false;
+
 // Groq conversation history for context
 let groqConversationHistory = [];
 
@@ -156,6 +159,12 @@ const sessionManager = createSessionManager({
     // The view is a projection of the thread: every event that lands is forwarded as is.
     onEvent: event => {
         sendToRenderer('thread-event', event);
+        // Warn once per session: without headphones the mic re-records the speakers,
+        // and the person cannot tell why their own turns are duplicated (B1/D18).
+        if (event.echo && !echoWarned) {
+            echoWarned = true;
+            sendToRenderer('echo-detected');
+        }
         scheduleThreadSave();
     },
     // The provider adapter lives here: it is the only thing that knows about Gemini.
@@ -1272,6 +1281,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 throw new Error('missing-api-key');
             }
 
+            echoWarned = false;
             currentSessionId = sessionId;
             startTransportLog(sessionId);
             saveSession(sessionId, { profile: resolved, events: [] });

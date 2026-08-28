@@ -27,6 +27,7 @@ let llamaCacheSnapshot = new Set();
 
 const { createVad, VAD_MODES } = require('../core/vad');
 const { cleanTranscription } = require('../core/transcript-filter');
+const { getPreferences } = require('../storage');
 
 // Serialises requests to whisper-server (it handles one at a time) and drops the
 // oldest if a backlog builds up, so the lag cannot grow without bound (B2).
@@ -72,18 +73,37 @@ const channelQueue = (() => {
 // and mixes the speakers up (task 7 of the plan). Resampling now happens in the
 // renderer with OfflineAudioContext, which filters properly (H7); PCM16 at 16 kHz
 // arrives here.
+// Frames are 100 ms, so seconds map straight onto frame counts.
+const FRAMES_PER_SECOND = 10;
+
+function maxSegmentFrames() {
+    const seconds = Number(getPreferences().maxSegmentSeconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    return Math.round(seconds * FRAMES_PER_SECOND);
+}
+
 function createChannel(speaker) {
     const vad = createVad({
         // D20: 2s of silence instead of 3, to bring the total latency down.
         mode: { ...VAD_MODES.NORMAL, silenceFramesRequired: 20 },
         preRollFrames: 3,
+        // D22: cut a long stretch of speech so the text arrives while you are still
+        // talking. Read from preferences because the right value depends on how the
+        // person speaks, and is meant to be tuned.
+        maxSegmentFrames: maxSegmentFrames(),
         onSpeechEnd: audioData => channelQueue.push(speaker, audioData),
     });
 
     return { vad, reset: () => vad.reset() };
 }
 
-const channels = { them: createChannel('them'), me: createChannel('me') };
+// Rebuilt when a session starts so a changed setting takes effect without
+// restarting the app: the VAD reads its cap once, at construction.
+let channels = { them: createChannel('them'), me: createChannel('me') };
+
+function rebuildChannels() {
+    channels = { them: createChannel('them'), me: createChannel('me') };
+}
 
 function createWavBuffer(pcm16Buffer) {
     const header = Buffer.alloc(44);
@@ -430,8 +450,7 @@ async function startTranscription({ whisperModel }) {
     sendToRenderer('update-status', 'Starting Whisper...');
     await startWhisperServer(whisperBinaryPath, whisperModelPath);
 
-    channels.them.reset();
-    channels.me.reset();
+    rebuildChannels();
     channelQueue.clear();
 
     isLocalActive = true;

@@ -159,3 +159,32 @@ test('formatClock gives the local time as zero-padded HH:MM', () => {
     assert.strictEqual(formatClock(t(14, 2)), '14:02');
     assert.strictEqual(formatClock(t(0, 0)), '00:00');
 });
+
+// An echoed turn is shown, collapsed, rather than hidden: the person needs to know
+// their mic is re-recording the speakers, and a false positive must not silently
+// swallow something they actually said (D23).
+test('an echoed turn keeps its own row, marked', () => {
+    const rows = projectThread([
+        { t: t(14, 2, 0), kind: 'speech', speaker: 'them', text: 'How would you handle a deadlock?' },
+        { t: t(14, 2, 1), kind: 'speech', speaker: 'me', text: 'How would you handle a deadlock', echo: true },
+    ]);
+
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[1].echo, true);
+});
+
+test('a normal turn is not marked as echo', () => {
+    const rows = projectThread([{ t: t(14, 2), kind: 'speech', speaker: 'me', text: 'Something I said.' }]);
+    assert.strictEqual(rows[0].echo, false);
+});
+
+// Merging an echoed fragment into a real turn would hide the duplicate inside
+// legitimate text and make the marking meaningless.
+test('an echoed segment never merges with a real one', () => {
+    const rows = projectThread([
+        { t: t(14, 2, 0), kind: 'speech', speaker: 'me', text: 'Something I said.' },
+        { t: t(14, 2, 2), kind: 'speech', speaker: 'me', text: 'Echoed words here.', echo: true },
+    ]);
+
+    assert.strictEqual(rows.length, 2);
+});

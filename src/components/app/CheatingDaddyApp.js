@@ -371,6 +371,34 @@ export class CheatingDaddyApp extends LitElement {
             white-space: nowrap;
         }
 
+        .end-session {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--danger);
+            border: none;
+            border-radius: 100px;
+            color: #ffffff;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: var(--font-size-xs);
+            letter-spacing: 0.02em;
+            padding: 5px var(--space-md);
+            white-space: nowrap;
+            transition: filter var(--transition);
+        }
+
+        .end-session:hover {
+            filter: brightness(1.12);
+        }
+
+        .end-session-icon {
+            width: 8px;
+            height: 8px;
+            border-radius: 1px;
+            background: #ffffff;
+        }
+
         /* ── Recording indicator ── */
 
         .rec {
@@ -619,6 +647,9 @@ export class CheatingDaddyApp extends LitElement {
                 this.streamingAnswer = '';
             });
             ipcRenderer.on('thread-event', (_, event) => this.appendThreadEvent(event));
+            ipcRenderer.on('echo-detected', () => {
+                this.addNotice('Your microphone is picking up the system audio. Use headphones and the duplicate turns will stop.');
+            });
             ipcRenderer.on('audio-levels', (_, levels) => {
                 this.audioLevels = levels;
             });
@@ -1130,26 +1161,21 @@ export class CheatingDaddyApp extends LitElement {
         return html`
             <div class="live-bar">
                 <div class="live-bar-left">
-                    <button class="live-bar-back" @click=${() => this.handleClose()} title="End session">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                            <path
-                                fill-rule="evenodd"
-                                d="M12.79 5.23a.75.75 0 0 1-.02 1.06L8.832 10l3.938 3.71a.75.75 0 1 1-1.04 1.08l-4.5-4.25a.75.75 0 0 1 0-1.08l4.5-4.25a.75.75 0 0 1 1.06.02Z"
-                                clip-rule="evenodd"
-                            />
-                        </svg>
-                    </button>
-                </div>
-                <div class="live-bar-center">${profileName}</div>
-                <div class="live-bar-right">
                     <span class="rec">
                         <span class="rec-dot"></span>
                         <span class="live-bar-text">${this.getElapsedTime()}</span>
                     </span>
+                </div>
+                <div class="live-bar-center">${profileName}</div>
+                <div class="live-bar-right">
                     ${this.renderChannelMeter('me', 'MIC', this.captureState.mic)} ${this.renderChannelMeter('them', 'SYS', this.captureState.system)}
                     ${this.statusText ? html`<span class="live-bar-text">${this.statusText}</span>` : ''}
                     ${this._isClickThrough ? html`<span class="live-bar-text">[click through]</span>` : ''}
                     <span class="live-bar-text clickable" @click=${() => this.handleHideToggle()}>[hide]</span>
+                    <button class="end-session" @click=${() => this.handleClose()} title="End the session and write the summary">
+                        <span class="end-session-icon"></span>
+                        End session
+                    </button>
                 </div>
             </div>
         `;

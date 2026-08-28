@@ -130,6 +130,49 @@ export class AssistantView extends LitElement {
             border-left-color: var(--accent);
         }
 
+        /* ── Echoed turn ── */
+
+        .row-echo {
+            border-left: 2px solid transparent;
+            padding-left: var(--space-md);
+        }
+
+        .echo-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: var(--font-size-xs);
+            letter-spacing: 0.04em;
+            color: var(--text-muted);
+            opacity: 0.65;
+            transition: opacity var(--transition);
+        }
+
+        .echo-toggle:hover {
+            opacity: 1;
+        }
+
+        .echo-caret {
+            display: inline-block;
+            transition: transform var(--transition);
+        }
+
+        .echo-caret.open {
+            transform: rotate(90deg);
+        }
+
+        .echo-text {
+            margin-top: 4px;
+            color: var(--text-muted);
+            opacity: 0.65;
+            font-size: var(--font-size-sm);
+        }
+
         /* ── Pregunta al asistente y su respuesta ── */
 
         .ask-question {
@@ -459,6 +502,7 @@ export class AssistantView extends LitElement {
         isAnalyzing: { type: Boolean, state: true },
         _thumbs: { state: true },
         _zoomed: { state: true },
+        _expandedEchoes: { state: true },
     };
 
     constructor() {
@@ -473,6 +517,7 @@ export class AssistantView extends LitElement {
         this.isAnalyzing = false;
         this._thumbs = new Map();
         this._zoomed = null;
+        this._expandedEchoes = new Set();
         this._animFrame = null;
         this._askCountWhenStarted = 0;
     }
@@ -844,8 +889,32 @@ export class AssistantView extends LitElement {
         `;
     }
 
+    toggleEcho(id) {
+        const next = new Set(this._expandedEchoes);
+        next.has(id) ? next.delete(id) : next.add(id);
+        this._expandedEchoes = next;
+    }
+
+    // Collapsed, not hidden: the person has to be able to tell their mic is
+    // re-recording the speakers, and to check what was flagged in case it was
+    // something they really said (D23).
+    renderEchoRow(row) {
+        const open = this._expandedEchoes.has(row.id);
+        return html`
+            <div class="row row-echo">
+                <button class="echo-toggle" @click=${() => this.toggleEcho(row.id)} title="Your microphone picked up the system audio">
+                    <span class="echo-caret ${open ? 'open' : ''}">›</span>
+                    Duplicate audio · ${this.clock(row.t)}
+                </button>
+                ${open ? html`<div class="said echo-text">${row.text}</div>` : ''}
+            </div>
+        `;
+    }
+
     renderRow(row) {
         if (row.kind === 'speech') {
+            if (row.echo) return this.renderEchoRow(row);
+
             return html`
                 <div class="row row-speech row-${row.speaker}">
                     <div class="who">
