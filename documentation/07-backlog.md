@@ -52,15 +52,12 @@ that already exist.
 
 ## Shipped
 
-### Electron upgrade
+### Electron 30 → 44 (D27)
 
-Electron 30 is Node 20 and Chrome 124. Electron 44 is Node 24 and Chrome 152, and
-brings `node:sqlite` in the standard library.
+Node 20 → 24, Chrome 124 → 152. Cheap because the app ships no native modules; the
+only two in the tree are build-time, from `maker-dmg`.
 
-Cheaper than it looks: the app ships **no native modules** — the only two in the
-tree come from `@electron-forge/maker-dmg` and are build-time only. The usual
-blocker does not apply here.
-
-The thing to re-verify is H1, the undetectable window, which is the most valuable
-thing in the repo: content protection, transparency and always-on-top. Content
-protection was already observed working on Electron 44 during an unrelated test.
+H1 was re-verified on 44 with the app running: its window is absent from a
+full-screen capture taken by a separate process. Two earlier decisions were
+revisited rather than left stale — D10 lost one of its four arguments, and D26's
+rejection of SQLite now rests on fit rather than availability.

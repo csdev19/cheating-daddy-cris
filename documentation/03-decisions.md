@@ -490,8 +490,8 @@ there is no debounce, and a crash costs at most the line being written. A torn
 final line is skipped on read and everything before it survives — verified by
 truncating a log on purpose.
 
-**Why not SQLite:** it was the obvious suggestion and it does not fit. Electron 30
-is Node 20, where `node:sqlite` does not exist, so it would mean a native
+**Why not SQLite:** it was the obvious suggestion and it does not fit. At the time
+Electron 30 meant Node 20, where `node:sqlite` does not exist, so it would mean a native
 dependency against a recorded constraint. More to the point, for this workload —
 append events, read one session whole — an append-only log gives the same crash
 durability, and the data stays as files the person can read, grep, back up and sync
@@ -516,3 +516,34 @@ truth.
 **Still not covered:** audio captured but not yet transcribed — up to
 `maxSegmentSeconds` in the VAD plus whatever is queued for Whisper — is not on disk
 in any form, and no storage choice would change that.
+
+---
+
+## D27 — Electron 44, and what that changes about earlier decisions
+
+**Decision:** upgrade Electron 30 → 44, which moves the main process from Node 20
+and Chrome 124 to Node 24 and Chrome 152.
+
+**Why it was cheap:** the app ships **no native modules**. The only two in the tree
+come from `@electron-forge/maker-dmg` and exist to build the installer, never to
+run. The usual reason Electron upgrades hurt did not apply.
+
+**What was verified rather than assumed:** H1, the undetectable window, is the most
+valuable thing in the repo, so it was tested before and after. With the app running
+on 44, its window is absent from a full-screen `desktopCapturer` capture taken from
+a separate process — the same test that shows a control window appearing when
+content protection is switched off.
+
+**What this changes about D10 (TanStack AI, rejected):** one of the four reasons was
+that it is pure ESM while the main process is CommonJS on Node 20, where
+`require(esm)` does not work. **That reason is now gone** — Node 24 supports it. The
+other three stand: it is pre-1.0, its Anthropic adapter does not document image
+input, and the project is consolidating towards one provider rather than spreading
+across eleven. The decision does not change; one of its arguments no longer holds
+and should not be cited.
+
+**What this changes about D26 (storage):** `node:sqlite` is now available with no
+new dependency. It still is not adopted, and the reason is no longer availability
+but fit: for appending events and reading one session whole, an append-only log
+gives the same crash durability while the data stays as files the person can read,
+grep, back up and sync. That argument is unaffected by the upgrade.

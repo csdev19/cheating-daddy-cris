@@ -22,8 +22,10 @@ instruction in this file that contradicts it.
 
 ## Constraints
 
-- **CommonJS and no build step.** The main process is Node 20 (Electron 30); it uses
-  neither ESM nor bundlers. `require()` of an ESM package **does not work** there.
+- **CommonJS and no build step.** The main process is Node 24 (Electron 44); it uses
+  neither ESM nor bundlers. Everything under `src/core/**` and `src/utils/**` stays
+  CommonJS. Node 24 can `require()` an ESM package, but that is not a reason to
+  reach for one — see D10.
 - **UI in Lit**, vendored in `src/assets/`. No migration to React or shadcn (D19).
 - **No new runtime dependencies** unless a decision is recorded in `03-decisions.md`.
 - **The renderer is a browser context** and already uses ES modules; an ESM library
