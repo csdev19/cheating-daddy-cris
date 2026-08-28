@@ -19,6 +19,8 @@ instruction in this file that contradicts it.
 | `documentation/04-evaluations.md`         | Libraries and models evaluated                       |
 | `documentation/05-implementation-plan.md` | Task-by-task plan                                    |
 | `documentation/06-audit.md`               | Audit: gaps, risks and improvements                  |
+| `documentation/07-backlog.md`             | Unbuilt work, with why it was deferred               |
+| `documentation/08-shipped.md`             | What shipped and what running it taught              |
 
 ## Constraints
 

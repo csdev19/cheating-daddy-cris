@@ -38,6 +38,8 @@ stops burning model calls on every turn.
 | [04-evaluations.md](04-evaluations.md)                 | Libraries and models evaluated, with data and prices        |
 | [05-implementation-plan.md](05-implementation-plan.md) | Implementation plan: 15 tasks, 58 tests, amendments applied |
 | [06-audit.md](06-audit.md)                             | Audit: gaps, risks, improvements and amendments to the plan |
+| [07-backlog.md](07-backlog.md)                         | Understood but unbuilt work, with why it was deferred       |
+| [08-shipped.md](08-shipped.md)                         | What shipped, what was measured, lessons from running it    |
 
 ## How to read it
 

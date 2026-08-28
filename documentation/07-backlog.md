@@ -20,6 +20,13 @@ it on the next launch. The cost is continuous audio writes for the whole meeting
 and real recovery logic. Deliberately deferred: at 12 s the exposure is small, and
 the transcript of everything already spoken is safe.
 
+### Context preview before starting a session (M3)
+
+From the audit. Before starting, show which profile, which `context/` files and how
+many tokens are about to be sent. It removes a silent failure mode — a note saved as
+`.txt` is never loaded, since the loader only reads `.md`, and you find out
+mid-meeting. Small, and not built.
+
 ### Gemini implicit caching is not confirmed working
 
 B4 from the audit. A real session logged `cachedContentTokenCount: 0 of 197`. That

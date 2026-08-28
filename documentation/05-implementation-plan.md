@@ -10,6 +10,13 @@
 
 **Spec:** [`documentation/02-design.md`](02-design.md) · decisions in [`documentation/03-decisions.md`](03-decisions.md) · findings in [`documentation/01-current-state.md`](01-current-state.md)
 
+> ⚠️ **This plan has been executed.** All 15 tasks shipped. The step checkboxes were
+> never ticked as the work progressed, so they read as unstarted — they are left as
+> written rather than back-filled, because ticking them now would be a guess about
+> which step each commit satisfied. For what actually shipped, what was measured, and
+> the bugs that only appeared once the app was run, see
+> [08-shipped.md](08-shipped.md). Open work is in [07-backlog.md](07-backlog.md).
+
 > ✅ **Audit amendments applied** (2026-08-26): tasks 7, 8, 10 and 12 extended; new 7b, 14 and 15. See [06-audit.md](06-audit.md).
 
 ## Global Constraints
