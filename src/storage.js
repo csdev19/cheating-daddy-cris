@@ -419,7 +419,11 @@ function saveSession(sessionId, data) {
         customPrompt: data.customPrompt || existingSession?.customPrompt || null,
         // Single event thread (replaces conversationHistory + screenAnalysisHistory)
         events: data.events || existingSession?.events || [],
-        digest: data.digest || existingSession?.digest || null,
+        digest: data.digest ?? existingSession?.digest ?? null,
+        // Marked when the summary call starts, cleared when it lands. A summary lost
+        // to a crash is unfinished work, and this is what makes it findable (D24).
+        digestPending: data.digestPending ?? existingSession?.digestPending ?? false,
+        digestAttempts: data.digestAttempts ?? existingSession?.digestAttempts ?? 0,
     };
     return writeJsonFile(sessionPath, sessionData);
 }
@@ -465,6 +469,9 @@ function getAllSessions() {
                         screenAnalysisCount: events.filter(e => e.kind === 'screen').length,
                         profile: data.profileName || data.profile || null,
                         hasDigest: Boolean(data.digest),
+                        digest: data.digest || null,
+                        digestPending: data.digestPending === true,
+                        digestAttempts: data.digestAttempts || 0,
                     };
                 }
                 return null;

@@ -6,13 +6,15 @@ const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, increm
 const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud, isCloudActive, setOnTurnComplete } = require('./cloud');
 const { startTransportLog, logTransportEvent, closeTransportLog } = require('./transportLogger');
 const { createSessionManager } = require('../core/session');
+const { fromJSON } = require('../core/session-context');
 const { resolveModes, resolveReasoningModel, resolveAudioTarget } = require('../core/modes');
 const { createLevelTracker } = require('../core/audio-levels');
 const { calculateRms } = require('../core/vad');
-const { getProfilesDir, resolveProfileName } = require('../core/profiles');
-const { getPreferences, getConfigDir, getHistoryDir, saveSession } = require('../storage');
+const { getProfilesDir, resolveProfileName, loadProfile } = require('../core/profiles');
+const { getPreferences, getConfigDir, getHistoryDir, saveSession, getSession, getAllSessions } = require('../storage');
 const { saveScreenshot, resolveScreenshotPath } = require('../core/screenshots');
 const { projectThread } = require('../core/thread-view');
+const { selectPendingDigests } = require('../core/digest-queue');
 
 // Lazy-loaded to avoid circular dependency (localai.js imports from gemini.js)
 let _localai = null;
@@ -207,6 +209,11 @@ async function generateSessionDigest(snapshot) {
     const { transcript, profile, sessionId } = snapshot;
     sendToRenderer('digest-started');
 
+    // Marked before the call, not after: if the app dies mid-call this is the only
+    // record that the work is still owed (D24).
+    const attempts = (getSession(sessionId)?.digestAttempts || 0) + 1;
+    saveSession(sessionId, { digestPending: true, digestAttempts: attempts });
+
     try {
         const { buildDigestPrompt, appendDigest } = require('../core/digest');
 
@@ -228,12 +235,60 @@ async function generateSessionDigest(snapshot) {
                 digest,
                 date: new Date().toISOString().slice(0, 10),
             });
+            saveSession(sessionId, { digest, digestPending: false });
             sendToRenderer('save-session-digest', { sessionId, digest });
         }
         sendToRenderer('digest-finished', { success: true });
     } catch (error) {
         console.error('Could not generate the session summary:', error);
         sendToRenderer('digest-finished', { success: false, error: error.message });
+    }
+}
+
+// Summarises a session already on disk, whether it is being retried automatically
+// or asked for by hand from the history.
+async function digestStoredSession(sessionId) {
+    const session = getSession(sessionId);
+    const profileName = session?.profileName || session?.profile;
+    if (!session || !profileName) return { success: false, error: 'Session not found' };
+
+    // Reuses the thread's own formatting, so a summary made after the fact reads
+    // exactly like one generated at the time — echoes excluded and all.
+    const transcript = fromJSON({ sessionId, events: session.events || [] }).getTranscript();
+    if (transcript.length <= 200) {
+        saveSession(sessionId, { digestPending: false });
+        return { success: false, error: 'Too little was said to summarise' };
+    }
+
+    let profile;
+    try {
+        profile = loadProfile(getProfilesDir(getConfigDir()), profileName);
+    } catch (error) {
+        // The profile was renamed or deleted; there is nowhere to file the summary.
+        console.warn(`Dropping the pending summary for ${sessionId}:`, error.message);
+        saveSession(sessionId, { digestPending: false });
+        return { success: false, error: `Profile '${profileName}' no longer exists` };
+    }
+
+    await generateSessionDigest({ transcript, profile, sessionId });
+    return { success: true };
+}
+
+// Redoes the summaries that were owed when the app last closed. Only sessions that
+// carry the explicit mark are eligible, so the back catalogue is never swept up and
+// re-summarised behind the person's back.
+async function drainPendingDigests() {
+    try {
+        const pending = selectPendingDigests(getAllSessions());
+        if (pending.length === 0) return;
+
+        console.log(`Finishing ${pending.length} session summary(ies) left over from last time`);
+
+        for (const entry of pending) {
+            await digestStoredSession(entry.sessionId);
+        }
+    } catch (error) {
+        console.error('Could not finish the pending summaries:', error);
     }
 }
 
@@ -1510,6 +1565,17 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         return { sessionId, events };
     });
 
+    // Any stored session can be summarised on request: a session the app never got
+    // to close properly carries no pending mark, so this is its way back (D24).
+    ipcMain.handle('generate-session-digest', async (event, sessionId) => {
+        try {
+            return await digestStoredSession(sessionId);
+        } catch (error) {
+            console.error('Could not generate the summary on request:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('close-session', async event => {
         try {
             stopMacOSAudioCapture();
@@ -1596,6 +1662,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 }
 
 module.exports = {
+    drainPendingDigests,
     endSessionForEmergency,
     sendPayloadToGemini,
     initializeGeminiSession,

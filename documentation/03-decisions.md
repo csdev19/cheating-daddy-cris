@@ -432,8 +432,20 @@ finishes would be reading whatever session is open by then, and the old code's
 `finally { sessionManager.end() }` would have wiped a session the person had
 already started.
 
-**What is given up:** quitting the app during those seconds loses that summary. The
-thread itself is never at risk — it reaches disk before the call starts.
+**Losing it is recoverable, not fatal.** The transcript reaches disk before the call
+starts, so a summary lost to a crash is not lost data — it is unfinished work. The
+session is marked `digestPending` before the call and the mark is cleared when it
+lands, so the next launch can finish what was owed.
+
+**Why an explicit mark rather than "has no summary":** deducing it would sweep up
+the entire back catalogue, including sessions recorded before summaries existed,
+and spend a model call on each one without being asked. Only sessions that actually
+reached the close path are eligible. After three failed attempts it stops retrying,
+so one broken session cannot retry on every launch for ever.
+
+**What the mark does not cover:** a session the app never got to close — killed
+mid-meeting — carries no mark. Its thread is still on disk, and the history offers
+a `Generate summary` button for any stored session, which is its way back.
 
 ---
 

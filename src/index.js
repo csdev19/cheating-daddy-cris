@@ -41,6 +41,14 @@ app.whenReady().then(async () => {
         console.error('Could not prepare the default profiles:', error);
     }
 
+    // A summary owed from last time is finished now. It only touches sessions that
+    // were explicitly marked, never the back catalogue (D24).
+    setTimeout(() => {
+        require('./utils/gemini')
+            .drainPendingDigests()
+            .catch(error => console.error('Could not finish the pending summaries:', error));
+    }, 3000);
+
     // Trigger screen recording permission prompt on macOS if not already granted
     if (process.platform === 'darwin') {
         const { desktopCapturer } = require('electron');

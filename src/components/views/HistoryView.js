@@ -267,6 +267,31 @@ export class HistoryView extends LitElement {
                 opacity: 0.6;
                 margin-bottom: 6px;
             }
+            .digest-button {
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+                color: var(--text-primary);
+                cursor: pointer;
+                font-family: var(--font-mono);
+                font-size: 11px;
+                padding: 5px 12px;
+            }
+
+            .digest-button:hover:not(:disabled) {
+                border-color: var(--accent);
+            }
+
+            .digest-button:disabled {
+                cursor: default;
+                opacity: 0.6;
+            }
+
+            .digest-error {
+                color: var(--danger);
+                margin-bottom: 8px;
+            }
+
             .session-digest-body {
                 white-space: pre-wrap;
                 font-size: 13px;
@@ -293,6 +318,7 @@ export class HistoryView extends LitElement {
         activeTab: { type: String },
         searchQuery: { type: String },
         _thumbs: { state: true },
+        _digesting: { state: true },
     };
 
     constructor() {
@@ -304,6 +330,7 @@ export class HistoryView extends LitElement {
         this.activeTab = 'conversation';
         this.searchQuery = '';
         this._thumbs = new Map();
+        this._digesting = false;
         this.loadSessions();
     }
 
@@ -399,6 +426,26 @@ export class HistoryView extends LitElement {
         });
     }
 
+    // A session the app never closed properly carries no pending mark, so it is
+    // never picked up automatically. This is how it gets its summary (D24).
+    async handleGenerateDigest() {
+        if (this._digesting || !this.selectedSessionId || !window.require) return;
+
+        this._digesting = true;
+        try {
+            const { ipcRenderer } = window.require('electron');
+            const result = await ipcRenderer.invoke('generate-session-digest', this.selectedSessionId);
+            if (!result?.success) {
+                this._digestError = result?.error || 'The summary could not be generated';
+            } else {
+                this._digestError = null;
+                this.selectedSession = await cheatingDaddy.storage.getSession(this.selectedSessionId);
+            }
+        } finally {
+            this._digesting = false;
+        }
+    }
+
     // Thumbnails live on disk under `history/<sessionId>/`; the thread only keeps
     // the ref, so they are fetched from main on demand.
     renderShot(ref) {
@@ -438,15 +485,25 @@ export class HistoryView extends LitElement {
         if (this.activeTab === 'conversation') {
             const messages = this.collectConversation(this.selectedSession);
             const digest = this.selectedSession.digest;
+            // A session with turns but no summary still has something to offer: the
+            // button to generate one. Only a genuinely empty session is empty.
             if (!messages.length && !digest) return html`<div class="empty">No conversation data.</div>`;
 
             // The summary comes first: usually it is the only thing worth rereading (M2).
-            const resumen = digest
+            const resumen = !digest
                 ? html`<div class="session-digest">
                       <div class="session-digest-title">Summary</div>
-                      <div class="session-digest-body">${digest}</div>
+                      <div class="session-digest-body">
+                          ${this._digestError ? html`<div class="digest-error">${this._digestError}</div>` : ''}
+                          <button class="digest-button" ?disabled=${this._digesting} @click=${() => this.handleGenerateDigest()}>
+                              ${this._digesting ? 'Generating…' : 'Generate summary'}
+                          </button>
+                      </div>
                   </div>`
-                : '';
+                : html`<div class="session-digest">
+                      <div class="session-digest-title">Summary</div>
+                      <div class="session-digest-body">${digest}</div>
+                  </div>`;
 
             return html`${resumen}${messages.map(
                 msg => html`
