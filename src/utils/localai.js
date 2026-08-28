@@ -533,7 +533,7 @@ function processLocalAudio(pcm16k, speaker = 'them') {
 
     const channel = channels[speaker];
     if (!channel) {
-        console.warn('[LocalAI] Hablante desconocido:', speaker);
+        console.warn('[LocalAI] Unknown speaker:', speaker);
         return;
     }
 

@@ -59,3 +59,30 @@ test('ignores a blank or non-string model', () => {
     assert.strictEqual(resolveReasoningModel({ model: '   ' }, {}), DEFAULT_GEMINI_MODEL);
     assert.strictEqual(resolveReasoningModel({ model: 42 }, {}), DEFAULT_GEMINI_MODEL);
 });
+
+// Audio routing must follow the transcription axis, not the reasoning one. Keying
+// it off the old single providerMode meant the design's own default combination
+// (transcribe locally, reason in the cloud) silently dropped every audio chunk.
+const { resolveAudioTarget } = require('../src/core/modes');
+
+test('local transcription routes audio to whisper even when reasoning is in the cloud', () => {
+    assert.strictEqual(resolveAudioTarget({ transcription: 'local-whisper', reasoning: 'gemini' }), 'local-whisper');
+});
+
+test('local transcription routes to whisper when reasoning is local too', () => {
+    assert.strictEqual(resolveAudioTarget({ transcription: 'local-whisper', reasoning: 'local-llama' }), 'local-whisper');
+});
+
+test('gemini-live transcription routes audio to the live session', () => {
+    assert.strictEqual(resolveAudioTarget({ transcription: 'gemini-live', reasoning: 'gemini' }), 'gemini-live');
+});
+
+test('cloud mode wins over the transcription axis', () => {
+    assert.strictEqual(resolveAudioTarget({ transcription: 'local-whisper' }, 'cloud'), 'cloud');
+});
+
+test('falls back to local transcription with no modes at all', () => {
+    assert.strictEqual(resolveAudioTarget(), 'local-whisper');
+    assert.strictEqual(resolveAudioTarget({}), 'local-whisper');
+    assert.strictEqual(resolveAudioTarget({ transcription: 'nonsense' }), 'local-whisper');
+});

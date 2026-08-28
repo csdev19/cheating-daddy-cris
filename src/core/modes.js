@@ -52,4 +52,13 @@ function resolveReasoningModel(profileMeta = {}, config = {}) {
     return DEFAULT_GEMINI_MODEL;
 }
 
-module.exports = { resolveModes, resolveReasoningModel, TRANSCRIPTION, REASONING, DEFAULT_GEMINI_MODEL };
+// Where a chunk of captured audio has to go. It follows the transcription axis on
+// purpose: routing it by the old single `providerMode` (which really tracks the
+// reasoning side) silently dropped every chunk under the default combination of
+// local Whisper plus cloud reasoning.
+function resolveAudioTarget(modes = {}, providerMode = null) {
+    if (providerMode === 'cloud') return 'cloud';
+    return TRANSCRIPTION.includes(modes.transcription) ? modes.transcription : 'local-whisper';
+}
+
+module.exports = { resolveModes, resolveReasoningModel, resolveAudioTarget, TRANSCRIPTION, REASONING, DEFAULT_GEMINI_MODEL };

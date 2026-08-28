@@ -6,7 +6,7 @@ const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, increm
 const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud, isCloudActive, setOnTurnComplete } = require('./cloud');
 const { startTransportLog, logTransportEvent, closeTransportLog } = require('./transportLogger');
 const { createSessionManager } = require('../core/session');
-const { resolveModes, resolveReasoningModel } = require('../core/modes');
+const { resolveModes, resolveReasoningModel, resolveAudioTarget } = require('../core/modes');
 const { createLevelTracker } = require('../core/audio-levels');
 const { calculateRms } = require('../core/vad');
 const { getProfilesDir, resolveProfileName } = require('../core/profiles');
@@ -23,6 +23,10 @@ function getLocalAi() {
 
 // Provider mode: 'byok', 'cloud', or 'local'
 let currentProviderMode = 'byok';
+
+// The two axes resolved for the running session (D14). Audio routing reads the
+// transcription axis from here; `currentProviderMode` only speaks for the provider.
+let currentModes = { transcription: 'local-whisper', reasoning: 'gemini' };
 
 // Groq conversation history for context
 let groqConversationHistory = [];
@@ -1108,10 +1112,11 @@ async function startMacOSAudioCapture(geminiSessionRef) {
             // from SystemAudioDump to the provider, so it is measured here.
             trackAudioLevel('them', monoChunk);
 
-            if (currentProviderMode === 'cloud') {
+            const target = resolveAudioTarget(currentModes, currentProviderMode);
+            if (target === 'cloud') {
                 sendCloudAudio(monoChunk);
-            } else if (currentProviderMode === 'local') {
-                getLocalAi().processLocalAudio(monoChunk);
+            } else if (target === 'local-whisper') {
+                getLocalAi().processLocalAudio(monoChunk, 'them');
             } else {
                 const base64Data = monoChunk.toString('base64');
                 sendAudioToGemini(base64Data, geminiSessionRef);
@@ -1257,6 +1262,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 
             const { profile, sessionId } = sessionManager.start({ profileName: resolved });
             const modes = resolveModes(prefs, profile.meta);
+            currentModes = modes;
             currentProviderMode = modes.reasoning === 'local-llama' ? 'local' : 'byok';
 
             // Without a key the failure would surface later, on the first question,
@@ -1310,7 +1316,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         const pcmBuffer = Buffer.from(data, 'base64');
         trackAudioLevel('them', pcmBuffer);
 
-        if (currentProviderMode === 'cloud') {
+        const target = resolveAudioTarget(currentModes, currentProviderMode);
+        if (target === 'cloud') {
             try {
                 sendCloudAudio(pcmBuffer);
                 return { success: true };
@@ -1319,7 +1326,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: false, error: error.message };
             }
         }
-        if (currentProviderMode === 'local') {
+        if (target === 'local-whisper') {
             try {
                 getLocalAi().processLocalAudio(pcmBuffer, 'them');
                 return { success: true };
@@ -1346,7 +1353,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         const pcmBuffer = Buffer.from(data, 'base64');
         trackAudioLevel('me', pcmBuffer);
 
-        if (currentProviderMode === 'cloud') {
+        const target = resolveAudioTarget(currentModes, currentProviderMode);
+        if (target === 'cloud') {
             try {
                 sendCloudAudio(pcmBuffer);
                 return { success: true };
@@ -1355,7 +1363,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: false, error: error.message };
             }
         }
-        if (currentProviderMode === 'local') {
+        if (target === 'local-whisper') {
             try {
                 getLocalAi().processLocalAudio(pcmBuffer, 'me');
                 return { success: true };
