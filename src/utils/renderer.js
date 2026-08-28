@@ -191,9 +191,20 @@ ipcRenderer.on('update-status', (event, status) => {
     cheatingDaddy.setStatus(status);
 });
 
+// What is actually being captured, as opposed to what the preferences ask for.
+// The indicator reads this, so a denied microphone or a failed system capture is
+// visible instead of silently producing an empty transcript.
+const captureState = { mic: false, system: false };
+
+function reportCaptureState() {
+    cheatingDaddy.setCaptureState({ ...captureState });
+}
+
 async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'medium') {
     // Store the image quality for manual screenshots
     currentImageQuality = imageQuality;
+    captureState.mic = false;
+    captureState.system = false;
 
     // Refresh preferences cache
     await loadPreferencesCache();
@@ -209,6 +220,8 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             if (!audioResult.success) {
                 throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
             }
+            captureState.system = true;
+            reportCaptureState();
 
             // Get screen capture for screenshots
             mediaStream = await navigator.mediaDevices.getDisplayMedia({
@@ -237,8 +250,11 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                     });
                     console.log('macOS microphone capture started');
                     setupLinuxMicProcessing(micStream);
+                    captureState.mic = true;
+                    reportCaptureState();
                 } catch (micError) {
                     console.warn('Failed to get microphone access on macOS:', micError);
+                    cheatingDaddy.addNotice('Microphone unavailable: your own voice will not be recorded.');
                 }
             }
         } else if (isLinux) {
@@ -587,6 +603,10 @@ function buildThumbnail(srcW, srcH) {
 window.captureManualScreenshot = captureManualScreenshot;
 
 function stopCapture() {
+    captureState.mic = false;
+    captureState.system = false;
+    reportCaptureState();
+
     if (screenshotInterval) {
         clearInterval(screenshotInterval);
         screenshotInterval = null;
@@ -1016,6 +1036,7 @@ const cheatingDaddy = {
     // Status and response functions
     setStatus: text => cheatingDaddyApp.setStatus(text),
     addNotice: text => cheatingDaddyApp.addNotice(text),
+    setCaptureState: state => cheatingDaddyApp.setCaptureState(state),
 
     // Core functionality
     initializeSession,

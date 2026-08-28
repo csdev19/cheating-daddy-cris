@@ -31,4 +31,25 @@ function resolveModes(prefs = {}, profileMeta = {}) {
     return { transcription, reasoning };
 }
 
-module.exports = { resolveModes, TRANSCRIPTION, REASONING };
+// Verified against ListModels and a real call on 2026-08-28. A GA model is the
+// default on purpose: `gemini-3.7-flash` is valid but was returning 503 (high
+// demand), and a default that fails mid-meeting is worse than a slightly older one.
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+
+// The Live API models only work over the WebSocket. Sending one to an HTTP
+// generateContent call returns a 404 in the middle of a meeting, so the id is
+// filtered here rather than trusted from config or from a profile.
+function isLiveModel(id) {
+    return /(^|[-.])live([-.]|$)/.test(id);
+}
+
+function resolveReasoningModel(profileMeta = {}, config = {}) {
+    for (const candidate of [profileMeta.model, config.geminiModel]) {
+        if (typeof candidate !== 'string') continue;
+        const clean = candidate.trim();
+        if (clean && !isLiveModel(clean)) return clean;
+    }
+    return DEFAULT_GEMINI_MODEL;
+}
+
+module.exports = { resolveModes, resolveReasoningModel, TRANSCRIPTION, REASONING, DEFAULT_GEMINI_MODEL };

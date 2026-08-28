@@ -31,3 +31,31 @@ test('ignores invalid values and falls back to the default', () => {
         reasoning: 'gemini',
     });
 });
+
+// The Live API model only works over the WebSocket. Reaching for it on an HTTP
+// generateContent call returns a 404 mid-meeting, which is exactly what happened:
+// the fallback chain read `geminiLiveModel` for a request that is not Live.
+const { resolveReasoningModel, DEFAULT_GEMINI_MODEL } = require('../src/core/modes');
+
+test('the profile model wins when it is set', () => {
+    assert.strictEqual(resolveReasoningModel({ model: 'gemini-2.5-pro' }, { geminiModel: 'gemini-3.7-flash' }), 'gemini-2.5-pro');
+});
+
+test('falls back to the configured HTTP model', () => {
+    assert.strictEqual(resolveReasoningModel({}, { geminiModel: 'gemini-2.5-flash' }), 'gemini-2.5-flash');
+});
+
+test('falls back to the built-in default with no config at all', () => {
+    assert.strictEqual(resolveReasoningModel({}, {}), DEFAULT_GEMINI_MODEL);
+    assert.strictEqual(resolveReasoningModel(), DEFAULT_GEMINI_MODEL);
+});
+
+test('never returns a Live model id, wherever it came from', () => {
+    assert.strictEqual(resolveReasoningModel({}, { geminiModel: 'gemini-3.1-flash-live-preview' }), DEFAULT_GEMINI_MODEL);
+    assert.strictEqual(resolveReasoningModel({ model: 'gemini-3.1-flash-live-preview' }, {}), DEFAULT_GEMINI_MODEL);
+});
+
+test('ignores a blank or non-string model', () => {
+    assert.strictEqual(resolveReasoningModel({ model: '   ' }, {}), DEFAULT_GEMINI_MODEL);
+    assert.strictEqual(resolveReasoningModel({ model: 42 }, {}), DEFAULT_GEMINI_MODEL);
+});

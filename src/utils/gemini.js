@@ -6,7 +6,9 @@ const { getAvailableModel, incrementLimitCount, getApiKey, getGroqApiKey, increm
 const { connectCloud, sendCloudAudio, sendCloudText, sendCloudImage, closeCloud, isCloudActive, setOnTurnComplete } = require('./cloud');
 const { startTransportLog, logTransportEvent, closeTransportLog } = require('./transportLogger');
 const { createSessionManager } = require('../core/session');
-const { resolveModes } = require('../core/modes');
+const { resolveModes, resolveReasoningModel } = require('../core/modes');
+const { createLevelTracker } = require('../core/audio-levels');
+const { calculateRms } = require('../core/vad');
 const { getProfilesDir, resolveProfileName } = require('../core/profiles');
 const { getPreferences, getConfigDir, getHistoryDir, saveSession } = require('../storage');
 const { saveScreenshot, resolveScreenshotPath } = require('../core/screenshots');
@@ -70,7 +72,9 @@ async function sendPayloadToGemini(payload) {
     const apiKey = getApiKey();
     if (!apiKey) throw new Error('Missing Gemini API key');
 
-    const model = payload.model || getConfig().geminiLiveModel || 'gemini-2.5-flash';
+    // The payload's model is neutral; deciding what is a valid Gemini id (and
+    // rejecting a Live-only one) belongs to the Gemini adapter.
+    const model = resolveReasoningModel({ model: payload.model }, getConfig());
     const client = new GoogleGenAI({ apiKey });
 
     const parts = [];
@@ -204,6 +208,19 @@ async function generateSessionDigest() {
         console.error('Could not generate the session summary:', error);
     } finally {
         sessionManager.end();
+    }
+}
+
+// Feeds the recording indicator. Every chunk of audio the app captures passes
+// through here, whatever the mode, so it is the one place that can honestly say
+// whether sound is arriving on each channel.
+const levelTracker = createLevelTracker({ emit: levels => sendToRenderer('audio-levels', levels) });
+
+function trackAudioLevel(speaker, pcmBuffer) {
+    try {
+        levelTracker.push(speaker, calculateRms(pcmBuffer));
+    } catch (error) {
+        console.error('Could not measure the audio level:', error);
     }
 }
 
@@ -1087,6 +1104,9 @@ async function startMacOSAudioCapture(geminiSessionRef) {
             audioBuffer = audioBuffer.slice(CHUNK_SIZE);
 
             const monoChunk = CHANNELS === 2 ? convertStereoToMono(chunk) : chunk;
+            // On macOS the system audio never crosses the IPC: it goes straight
+            // from SystemAudioDump to the provider, so it is measured here.
+            trackAudioLevel('them', monoChunk);
 
             if (currentProviderMode === 'cloud') {
                 sendCloudAudio(monoChunk);
@@ -1287,9 +1307,11 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     });
 
     ipcMain.handle('send-audio-content', async (event, { data, mimeType }) => {
+        const pcmBuffer = Buffer.from(data, 'base64');
+        trackAudioLevel('them', pcmBuffer);
+
         if (currentProviderMode === 'cloud') {
             try {
-                const pcmBuffer = Buffer.from(data, 'base64');
                 sendCloudAudio(pcmBuffer);
                 return { success: true };
             } catch (error) {
@@ -1299,7 +1321,6 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
         if (currentProviderMode === 'local') {
             try {
-                const pcmBuffer = Buffer.from(data, 'base64');
                 getLocalAi().processLocalAudio(pcmBuffer, 'them');
                 return { success: true };
             } catch (error) {
@@ -1322,9 +1343,11 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 
     // Handle microphone audio on a separate channel
     ipcMain.handle('send-mic-audio-content', async (event, { data, mimeType }) => {
+        const pcmBuffer = Buffer.from(data, 'base64');
+        trackAudioLevel('me', pcmBuffer);
+
         if (currentProviderMode === 'cloud') {
             try {
-                const pcmBuffer = Buffer.from(data, 'base64');
                 sendCloudAudio(pcmBuffer);
                 return { success: true };
             } catch (error) {
@@ -1334,7 +1357,6 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         }
         if (currentProviderMode === 'local') {
             try {
-                const pcmBuffer = Buffer.from(data, 'base64');
                 getLocalAi().processLocalAudio(pcmBuffer, 'me');
                 return { success: true };
             } catch (error) {
@@ -1460,6 +1482,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
     ipcMain.handle('close-session', async event => {
         try {
             stopMacOSAudioCapture();
+            levelTracker.reset();
             // Generating the summary ends the session, so the thread is saved before
             // the context is emptied.
             flushThreadSave();

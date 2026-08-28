@@ -9,7 +9,10 @@ const DEFAULT_CONFIG = {
     configVersion: CONFIG_VERSION,
     onboarded: false,
     layout: 'normal',
+    // Two different APIs, two different ids: `geminiLiveModel` is the WebSocket
+    // Live model, `geminiModel` is the HTTP one used to reason.
     geminiLiveModel: 'gemini-3.1-flash-live-preview',
+    geminiModel: 'gemini-2.5-flash',
     groqModel: 'qwen/qwen3.6-27b',
     groqImageModel: 'qwen/qwen3.6-27b',
     disableGroqThinking: true,

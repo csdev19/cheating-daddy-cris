@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const { Readable, Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const { getConfigDir } = require('../storage');
+const { planDownload } = require('../core/download-plan');
 
 const RELEASE_BASE_URL = 'https://github.com/sohzm/cheating-daddy/releases/download/v0.7.0';
 
@@ -73,6 +74,7 @@ const WHISPER_MODELS = {
         filename: 'ggml-large-v3-turbo.bin',
         url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',
         sha256: '1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69',
+        bytes: 1624555275,
     },
 };
 
@@ -111,16 +113,49 @@ async function fileMatchesChecksum(filePath, expectedSha256) {
     return actualSha256 === expectedSha256;
 }
 
-async function downloadFile(url, destinationPath, onProgress, signal) {
-    const temporaryPath = `${destinationPath}.download-${process.pid}-${Date.now()}`;
-    const response = await fetch(url, { redirect: 'follow', signal });
+// The partial keeps a stable name so a later attempt can find it. The old code
+// used pid + timestamp and deleted it on any error, which is why an interrupted
+// 1.6 GB model download started over from zero every single time.
+function partialPathFor(destinationPath) {
+    return `${destinationPath}.part`;
+}
+
+function partialSize(partialPath) {
+    try {
+        return fs.statSync(partialPath).size;
+    } catch {
+        return 0;
+    }
+}
+
+async function downloadFile(url, destinationPath, onProgress, signal, expectedTotalBytes = 0) {
+    const temporaryPath = partialPathFor(destinationPath);
+    const intent = planDownload({ partialBytes: partialSize(temporaryPath), totalBytes: expectedTotalBytes });
+
+    if (intent.mode === 'complete') return temporaryPath;
+
+    const headers = intent.rangeHeader ? { Range: intent.rangeHeader } : {};
+    const response = await fetch(url, { redirect: 'follow', signal, headers });
 
     if (!response.ok || !response.body) {
         throw new Error(`Download failed with HTTP ${response.status}: ${url}`);
     }
 
-    const expectedBytes = Number(response.headers.get('content-length')) || 0;
-    let downloadedBytes = 0;
+    // Re-plan against what the server actually answered: a 200 to a Range request
+    // means the whole body is coming and the partial must be discarded.
+    const plan = planDownload({
+        partialBytes: partialSize(temporaryPath),
+        totalBytes: expectedTotalBytes,
+        serverStatus: intent.rangeHeader ? response.status : 206,
+    });
+
+    const remainingBytes = Number(response.headers.get('content-length')) || 0;
+    const expectedBytes = expectedTotalBytes || plan.alreadyHave + remainingBytes;
+    let downloadedBytes = plan.alreadyHave;
+
+    if (plan.alreadyHave > 0) {
+        console.log(`Resuming ${path.basename(destinationPath)} at ${plan.alreadyHave} of ${expectedBytes} bytes`);
+    }
 
     try {
         const input = Readable.fromWeb(response.body);
@@ -131,16 +166,17 @@ async function downloadFile(url, destinationPath, onProgress, signal) {
                 callback(null, chunk);
             },
         });
-        await pipeline(input, progressStream, fs.createWriteStream(temporaryPath, { flags: 'wx' }));
+        await pipeline(input, progressStream, fs.createWriteStream(temporaryPath, { flags: plan.flags }));
 
         return temporaryPath;
     } catch (error) {
-        fs.rmSync(temporaryPath, { force: true });
+        // The partial is deliberately left on disk: it is what makes the next
+        // attempt resume instead of re-downloading gigabytes.
         throw error;
     }
 }
 
-async function installVerifiedFile({ url, destinationPath, sha256, executable, onProgress, signal }) {
+async function installVerifiedFile({ url, destinationPath, sha256, expectedBytes = 0, executable, onProgress, signal }) {
     fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
 
     if (await fileMatchesChecksum(destinationPath, sha256)) {
@@ -150,10 +186,12 @@ async function installVerifiedFile({ url, destinationPath, sha256, executable, o
         return destinationPath;
     }
 
-    const temporaryPath = await downloadFile(url, destinationPath, onProgress, signal);
+    const temporaryPath = await downloadFile(url, destinationPath, onProgress, signal, expectedBytes);
     const downloadedSha256 = await calculateSha256(temporaryPath);
 
     if (downloadedSha256 !== sha256) {
+        // A bad checksum means the bytes are wrong, not incomplete: keeping the
+        // partial would make every later resume append onto corruption.
         fs.rmSync(temporaryPath, { force: true });
         throw new Error(`Checksum verification failed for ${path.basename(destinationPath)}`);
     }
@@ -205,6 +243,7 @@ async function ensureWhisperModel(modelName, onProgress, signal) {
         url: model.url,
         destinationPath,
         sha256: model.sha256,
+        expectedBytes: model.bytes || 0,
         executable: false,
         onProgress,
         signal,

@@ -371,6 +371,90 @@ export class CheatingDaddyApp extends LitElement {
             white-space: nowrap;
         }
 
+        /* ── Recording indicator ── */
+
+        .rec {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .rec-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--danger);
+            animation: rec-pulse 1.6s ease-in-out infinite;
+        }
+
+        @keyframes rec-pulse {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.35;
+            }
+        }
+
+        .meter {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .meter-label {
+            font-size: 9px;
+            letter-spacing: 0.08em;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+        }
+
+        .meter.off .meter-label {
+            opacity: 0.45;
+        }
+
+        .meter-off {
+            font-size: 9px;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            opacity: 0.45;
+        }
+
+        .meter-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 1.5px;
+            height: 11px;
+        }
+
+        .meter-bars i {
+            width: 2px;
+            background: var(--border-strong);
+            border-radius: 1px;
+            transition: background 90ms linear;
+        }
+
+        .meter-bars i:nth-child(1) {
+            height: 3px;
+        }
+        .meter-bars i:nth-child(2) {
+            height: 5px;
+        }
+        .meter-bars i:nth-child(3) {
+            height: 7px;
+        }
+        .meter-bars i:nth-child(4) {
+            height: 9px;
+        }
+        .meter-bars i:nth-child(5) {
+            height: 11px;
+        }
+
+        .meter-bars i.on {
+            background: var(--accent);
+        }
+
         .live-bar-text.clickable {
             cursor: pointer;
             transition: color var(--transition);
@@ -437,6 +521,8 @@ export class CheatingDaddyApp extends LitElement {
         _viewInstances: { type: Object, state: true },
         _isClickThrough: { state: true },
         pendingAsk: { state: true },
+        captureState: { state: true },
+        audioLevels: { state: true },
         streamingAnswer: { state: true },
         notices: { state: true },
         _storageLoaded: { state: true },
@@ -461,6 +547,8 @@ export class CheatingDaddyApp extends LitElement {
         this.availableProfiles = [];
         this.toast = null;
         this.pendingAsk = null;
+        this.captureState = { mic: false, system: false };
+        this.audioLevels = { them: 0, me: 0 };
         this.streamingAnswer = '';
         this.notices = [];
         this._viewInstances = new Map();
@@ -531,6 +619,9 @@ export class CheatingDaddyApp extends LitElement {
                 this.streamingAnswer = '';
             });
             ipcRenderer.on('thread-event', (_, event) => this.appendThreadEvent(event));
+            ipcRenderer.on('audio-levels', (_, levels) => {
+                this.audioLevels = levels;
+            });
             ipcRenderer.on('ask-started', (_, ask) => {
                 this.pendingAsk = ask;
                 this.streamingAnswer = '';
@@ -638,6 +729,12 @@ export class CheatingDaddyApp extends LitElement {
         }, 6000);
     }
 
+    // Called by the renderer once it knows what actually opened, not what the
+    // preferences asked for.
+    setCaptureState(state) {
+        this.captureState = state;
+    }
+
     appendThreadEvent(event) {
         this.threadEvents = [...this.threadEvents, event];
         // The `ask` event already carries the full answer: the pending row is redundant.
@@ -722,6 +819,8 @@ export class CheatingDaddyApp extends LitElement {
         this.availableProfiles = [];
         this.toast = null;
         this.pendingAsk = null;
+        this.captureState = { mic: false, system: false };
+        this.audioLevels = { them: 0, me: 0 };
         this.streamingAnswer = '';
         this.startTime = Date.now();
         this.sessionActive = true;
@@ -874,6 +973,7 @@ export class CheatingDaddyApp extends LitElement {
                         .pendingAsk=${this.pendingAsk}
                         .streamingAnswer=${this.streamingAnswer}
                         .notices=${this.notices}
+                        .captureState=${this.captureState}
                         .selectedProfile=${this.selectedProfile}
                         .onSendText=${msg => this.handleSendText(msg)}
                     ></assistant-view>
@@ -1001,17 +1101,31 @@ export class CheatingDaddyApp extends LitElement {
         `;
     }
 
+    // Five bars driven by the real RMS of that channel. A channel that is not
+    // being captured reads OFF rather than a flat meter, so "no audio" and "not
+    // listening at all" never look the same.
+    renderChannelMeter(speaker, label, isCapturing) {
+        const level = isCapturing ? this.audioLevels[speaker] || 0 : 0;
+        const bars = [0.04, 0.1, 0.2, 0.35, 0.55];
+
+        return html`
+            <span class="meter ${isCapturing ? '' : 'off'}" title=${isCapturing ? `${label} capturing` : `${label} not captured`}>
+                <span class="meter-label">${label}</span>
+                ${
+                    isCapturing
+                        ? html`<span class="meter-bars"> ${bars.map(threshold => html`<i class=${level >= threshold ? 'on' : ''}></i>`)} </span>`
+                        : html`<span class="meter-off">off</span>`
+                }
+            </span>
+        `;
+    }
+
     renderLiveBar() {
         if (!this._isLiveMode()) return '';
 
-        const profileLabels = {
-            interview: 'Interview',
-            sales: 'Sales Call',
-            meeting: 'Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam',
-        };
+        // The display name comes from the profile on disk; a hardcoded map goes
+        // stale the moment a profile is renamed or added.
+        const profileName = this.availableProfiles.find(p => p.dir === this.selectedProfile)?.name || 'Session';
 
         return html`
             <div class="live-bar">
@@ -1026,10 +1140,14 @@ export class CheatingDaddyApp extends LitElement {
                         </svg>
                     </button>
                 </div>
-                <div class="live-bar-center">${profileLabels[this.selectedProfile] || 'Session'}</div>
+                <div class="live-bar-center">${profileName}</div>
                 <div class="live-bar-right">
+                    <span class="rec">
+                        <span class="rec-dot"></span>
+                        <span class="live-bar-text">${this.getElapsedTime()}</span>
+                    </span>
+                    ${this.renderChannelMeter('me', 'MIC', this.captureState.mic)} ${this.renderChannelMeter('them', 'SYS', this.captureState.system)}
                     ${this.statusText ? html`<span class="live-bar-text">${this.statusText}</span>` : ''}
-                    <span class="live-bar-text">${this.getElapsedTime()}</span>
                     ${this._isClickThrough ? html`<span class="live-bar-text">[click through]</span>` : ''}
                     <span class="live-bar-text clickable" @click=${() => this.handleHideToggle()}>[hide]</span>
                 </div>

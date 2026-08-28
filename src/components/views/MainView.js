@@ -699,6 +699,7 @@ export class MainView extends LitElement {
         _groqKey: { state: true },
         _openaiKey: { state: true },
         _geminiLiveModel: { state: true },
+        _geminiModel: { state: true },
         _groqModel: { state: true },
         _groqImageModel: { state: true },
         _disableGroqThinking: { state: true },
@@ -728,6 +729,7 @@ export class MainView extends LitElement {
         this._groqKey = '';
         this._openaiKey = '';
         this._geminiLiveModel = 'gemini-3.1-flash-live-preview';
+        this._geminiModel = 'gemini-2.5-flash';
         this._groqModel = 'qwen/qwen3.6-27b';
         this._groqImageModel = 'qwen/qwen3.6-27b';
         this._disableGroqThinking = true;
@@ -768,6 +770,7 @@ export class MainView extends LitElement {
             this._groqKey = (await cheatingDaddy.storage.getGroqApiKey().catch(() => '')) || '';
             this._openaiKey = creds.openaiKey || '';
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
+            this._geminiModel = config.geminiModel || 'gemini-2.5-flash';
             this._groqModel = config.groqModel || 'qwen/qwen3.6-27b';
             this._groqImageModel = config.groqImageModel || 'qwen/qwen3.6-27b';
             this._disableGroqThinking = config.disableGroqThinking === true;
@@ -948,6 +951,12 @@ export class MainView extends LitElement {
     async _saveGeminiLiveModel(val) {
         this._geminiLiveModel = val;
         await cheatingDaddy.storage.updateConfig('geminiLiveModel', val);
+        this.requestUpdate();
+    }
+
+    async _saveGeminiModel(val) {
+        this._geminiModel = val;
+        await cheatingDaddy.storage.updateConfig('geminiModel', val);
         this.requestUpdate();
     }
 
@@ -1184,6 +1193,13 @@ export class MainView extends LitElement {
                     <div class="form-group">
                         <label class="form-label">Gemini Live Model</label>
                         <input type="text" .value=${this._geminiLiveModel} @input=${e => this._saveGeminiLiveModel(e.target.value)} />
+                        <div class="form-hint">WebSocket transcription only. A Live id does not work for answers.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Gemini Model</label>
+                        <input type="text" .value=${this._geminiModel} @input=${e => this._saveGeminiModel(e.target.value)} />
+                        <div class="form-hint">Used to answer. Must support generateContent.</div>
                     </div>
                 </div>
             </details>

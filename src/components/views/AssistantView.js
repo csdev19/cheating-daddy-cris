@@ -64,6 +64,22 @@ export class AssistantView extends LitElement {
             color: var(--text-muted);
             font-size: var(--font-size-sm);
             text-align: center;
+            max-width: 44ch;
+            line-height: 1.5;
+        }
+
+        .empty-title {
+            font-family: var(--font-mono);
+            font-size: var(--font-size-xs);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: var(--space-sm);
+        }
+
+        .empty-hint {
+            margin-top: var(--space-sm);
+            opacity: 0.6;
         }
 
         /* ── Etiqueta de hablante ── */
@@ -437,6 +453,7 @@ export class AssistantView extends LitElement {
         pendingAsk: { type: Object },
         streamingAnswer: { type: String },
         notices: { type: Array },
+        captureState: { type: Object },
         selectedProfile: { type: String },
         onSendText: { type: Function },
         isAnalyzing: { type: Boolean, state: true },
@@ -450,6 +467,7 @@ export class AssistantView extends LitElement {
         this.pendingAsk = null;
         this.streamingAnswer = '';
         this.notices = [];
+        this.captureState = { mic: false, system: false };
         this.selectedProfile = 'interview';
         this.onSendText = () => {};
         this.isAnalyzing = false;
@@ -486,6 +504,16 @@ export class AssistantView extends LitElement {
         }
 
         return rows;
+    }
+
+    // The empty thread is the moment a silent misconfiguration is invisible, so it
+    // says out loud which channels are actually open.
+    capturingLabel() {
+        const { mic, system } = this.captureState || {};
+        if (mic && system) return 'Recording your microphone and the system audio.';
+        if (mic) return 'Recording your microphone only — system audio is not being captured.';
+        if (system) return 'Recording the system audio only — your own voice is not being captured.';
+        return 'No audio is being captured yet.';
     }
 
     clock(t) {
@@ -889,7 +917,11 @@ export class AssistantView extends LitElement {
             <div class="thread">
                 ${
                     rows.length === 0
-                        ? html`<div class="empty">Listening. Whatever is said will show up here.</div>`
+                        ? html`<div class="empty">
+                              <div class="empty-title">Listening</div>
+                              <div>${this.capturingLabel()}</div>
+                              <div class="empty-hint">Whatever is said will show up here.</div>
+                          </div>`
                         : rows.map(row => html`<div data-row=${row.id}>${this.renderRow(row)}</div>`)
                 }
             </div>
