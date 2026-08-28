@@ -21,7 +21,7 @@ Available profiles: interview, sales, meeting, presentation, negotiation, exam.
 | UI           | **Lit** loaded as an asset (`src/assets/lit-core-2.7.4.min.js`), not npm      |
 | Dependencies | `@google/genai`, `ws`, `electron-squirrel-startup`                            |
 | Tests        | None                                                                          |
-| Lint         | None (`npm run lint` prints "No linting configured")                          |
+| Lint         | None (`bun run lint` prints "No linting configured")                          |
 
 One consequence matters a lot: the **main process is CommonJS on Node 20**, where
 `require()` of an ESM package does not work. The **renderer is a browser context

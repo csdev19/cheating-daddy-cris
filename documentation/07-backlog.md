@@ -50,6 +50,20 @@ that already exist.
 
 ---
 
+## Open
+
+### Monorepo, when there is a second consumer of `core`
+
+The rest of the workspace is bun monorepos shaped `apps/*` / `packages/*`.
+`src/core/` is already package-shaped: pure, no Electron, no dependencies, fully
+tested. Two things are unresolved (D28): electron-forge bundles `node_modules` from
+the project root into the asar, and a workspace hoists to the repo root, so
+packaging from inside one needs testing; and the shared catalog pins a
+TypeScript/vite/tailwind stack this project does not use by decision (D19). Worth
+doing when something else needs to consume `core`.
+
+---
+
 ## Shipped
 
 ### Electron 30 → 44 (D27)

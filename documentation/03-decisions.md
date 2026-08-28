@@ -547,3 +547,47 @@ new dependency. It still is not adopted, and the reason is no longer availabilit
 but fit: for appending events and reading one session whole, an append-only log
 gives the same crash durability while the data stays as files the person can read,
 grep, back up and sync. That argument is unaffected by the upgrade.
+
+---
+
+## D28 — bun as the package manager
+
+**Decision:** bun replaces npm. `package.json` declares `packageManager: bun@1.3.4`
+and `bun.lock` is committed. `bun run <script>` is the canonical way to run
+anything.
+
+**Why bun and not pnpm:** on strictness alone pnpm wins — it blocks every install
+script by default, including native builds, and the allowlist is declarative and
+reviewable. But twelve of the thirteen projects in this workspace already use bun
+with the same `apps/*` / `packages/*` shape and a shared catalog. Being the odd one
+out costs more day to day than that margin is worth.
+
+**The security argument, stated honestly:** changing package manager does not change
+the supply chain. All of them install the same tarballs from the same registry. What
+changes is who may execute code on the machine at install time. npm runs every
+lifecycle script without asking; bun blocks untrusted ones by default. Here that is
+two — `@google/genai`, whose `preinstall` is literally `echo 'preinstall: no-op'`,
+and `protobufjs`. Both stay blocked and the full suite passes.
+
+**Verified before switching, not after:** `bun install` (538 packages, 1.5 s),
+197/197 tests, the app boots, and `bun run make` produces a working 126 MB DMG with
+the runtime dependencies correctly bundled inside `app.asar`. Packaging was the real
+risk and it was checked first.
+
+`node_modules` drops from 428 MB to 200 MB.
+
+**Known rough edge:** electron-forge 7.8.1 does not know about bun and reports
+`Found npm` at startup. Nothing depends on it in the current flow — packaging
+works — but if forge ever needs to install on its own it would reach for npm.
+
+**Use `bun run test`, not `bun test`.** Both pass, but the first runs `node --test`
+while the second uses bun's own runtime. The app runs on Node inside Electron, so
+tests should too, or a Node-specific difference could hide until production.
+
+**Not a monorepo, for now.** The other projects are monorepos, and `src/core/` is
+genuinely package-shaped — pure, no Electron, no dependencies, fully tested. But
+forge bundles `node_modules` from the project root into the asar, and a workspace
+hoists dependencies to the repo root, so packaging from inside a workspace needs
+work that has not been done or tested. And the shared catalog pins TypeScript, vite
+and tailwind, none of which this project uses by decision (D19). It becomes worth
+doing when a second consumer of `core` exists.
