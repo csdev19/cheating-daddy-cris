@@ -77,6 +77,20 @@ Tests went from 72 to 197.
 - **Summary detached from the close**, resumable on next launch (D24).
 - **Sessions are folders**: atomic metadata, append-only events (D26).
 - **Resumable model downloads** — an interrupted 1.6 GB download no longer restarts.
+- **A stored session copies out as Markdown**: one button in the history detail
+  hands over the same document `transcript.md` holds, rendered on demand rather
+  than read back, so sessions older than that file and summaries generated later
+  are both included. Found in use: the summary block was the one text block in
+  the view without `user-select`, so the most useful part could not even be
+  selected by hand.
+- **The history renders the thread the way the live view does.** The claim above
+  was only half true: `HistoryView` shared the projection but painted it as chat
+  bubbles, and tagged them `me` / `them` while its CSS styled `user` / `ai`. The
+  two speakers matched no rule and came out identical, so a reread transcript did
+  not say who was talking. Both views now use the same speaker label and channel
+  marker, and the markdown styles and renderer live in one shared module instead
+  of one copy per view — the summary and the stored answers are read as Markdown,
+  not as asterisks.
 - Everything user-facing is in English; the profile picker reads from disk.
 
 ---

@@ -1,9 +1,13 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 import { unifiedPageStyles } from './sharedPageStyles.js';
+import { markdownStyles, markdownNode } from './markdown.js';
+
+const SPEAKER_LABELS = { them: 'Them', me: 'Me' };
 
 export class HistoryView extends LitElement {
     static styles = [
         unifiedPageStyles,
+        markdownStyles,
         css`
             .unified-page {
                 overflow-y: hidden;
@@ -124,6 +128,29 @@ export class HistoryView extends LitElement {
                 font-size: var(--font-size-sm);
             }
 
+            .copy-btn {
+                margin-left: auto;
+                border: 1px solid var(--border);
+                border-radius: var(--radius-sm);
+                background: var(--bg-elevated);
+                color: var(--text-secondary);
+                padding: 5px 12px;
+                font-size: var(--font-size-xs);
+                cursor: pointer;
+                white-space: nowrap;
+                transition: color var(--transition), border-color var(--transition);
+            }
+
+            .copy-btn:hover:not(:disabled) {
+                color: var(--text-primary);
+                border-color: var(--accent);
+            }
+
+            .copy-btn:disabled {
+                cursor: default;
+                opacity: 0.5;
+            }
+
             .tab-row {
                 display: flex;
                 gap: 6px;
@@ -154,74 +181,126 @@ export class HistoryView extends LitElement {
                 min-height: 0;
                 display: flex;
                 flex-direction: column;
-                gap: var(--space-sm);
+                gap: var(--space-md);
                 padding: var(--space-sm) 0;
-            }
-
-            .message-row {
-                display: flex;
-            }
-
-            .message-row.user {
-                justify-content: flex-end;
-            }
-
-            .message-row.ai,
-            .message-row.screen {
-                justify-content: flex-start;
-            }
-
-            .message {
-                max-width: 75%;
-                border-radius: 16px;
-                padding: 8px 12px;
-                word-break: break-word;
                 user-select: text;
                 cursor: text;
-                font-size: var(--font-size-sm);
-                line-height: 1.45;
             }
 
-            .message-body {
+            .details-scroll * {
+                user-select: text;
+                cursor: text;
+            }
+
+            /* ── Speaker label ── */
+
+            .who {
+                display: flex;
+                align-items: baseline;
+                gap: var(--space-sm);
+                margin-bottom: 2px;
+                font-family: var(--font-mono);
+                font-size: var(--font-size-xs);
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+            }
+
+            .who .clock {
+                color: var(--text-muted);
+                letter-spacing: 0;
+            }
+
+            .row-them .who .name {
+                color: var(--text-secondary);
+            }
+
+            .row-me .who .name {
+                color: var(--accent);
+            }
+
+            .row-ask .who .name {
+                color: var(--accent);
+            }
+
+            .said {
                 white-space: pre-wrap;
             }
 
-            .history-shot {
-                display: block;
-                max-width: 100%;
+            /* Channel marker: whose turn it is reads at a glance, without the label. */
+            .row-speech,
+            .row-echo {
+                border-left: 2px solid transparent;
+                padding-left: var(--space-md);
+            }
+
+            .row-them {
+                border-left-color: var(--border-strong);
+            }
+
+            .row-me {
+                border-left-color: var(--accent);
+            }
+
+            /* Kept rather than dropped: the duplicate has to be visible to be
+               recognised as one, but it is not part of what was said (D23). */
+            .echo-label {
+                font-family: var(--font-mono);
+                font-size: var(--font-size-xs);
+                letter-spacing: 0.04em;
+                color: var(--text-muted);
+                opacity: 0.65;
+            }
+
+            .echo-text {
+                margin-top: 4px;
+                color: var(--text-muted);
+                opacity: 0.65;
+                font-size: var(--font-size-sm);
+            }
+
+            .ask-question {
+                border-left: 2px solid var(--accent);
+                padding-left: var(--space-md);
+            }
+
+            .answer {
                 margin-top: var(--space-sm);
+                background: var(--bg-surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius-md);
+                padding: var(--space-md);
+            }
+
+            .answer-tag {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                margin-bottom: var(--space-sm);
+                font-family: var(--font-mono);
+                font-size: var(--font-size-xs);
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--accent);
+            }
+
+            .answer-tag svg {
+                width: 11px;
+                height: 11px;
+            }
+
+            .row-screen .caption {
+                color: var(--text-muted);
+                font-size: var(--font-size-xs);
+                font-family: var(--font-mono);
+            }
+
+            .shot {
+                margin-top: var(--space-sm);
+                display: block;
+                max-width: 260px;
+                width: 100%;
                 border: 1px solid var(--border);
                 border-radius: var(--radius-sm);
-            }
-
-            .message-meta {
-                font-size: 10px;
-                margin-top: 4px;
-                opacity: 0.5;
-            }
-
-            .message-row.user .message {
-                background: var(--accent);
-                color: var(--bg-app);
-                border-bottom-right-radius: 4px;
-            }
-
-            .message-row.user .message-meta {
-                text-align: right;
-            }
-
-            .message-row.ai .message {
-                background: var(--bg-elevated);
-                color: var(--text-primary);
-                border: 1px solid var(--border);
-                border-bottom-left-radius: 4px;
-            }
-
-            .message-row.screen .message {
-                background: var(--bg-elevated);
-                color: var(--text-primary);
-                border: 1px solid var(--border);
-                border-bottom-left-radius: 4px;
             }
 
             .context-row {
@@ -292,10 +371,13 @@ export class HistoryView extends LitElement {
                 margin-bottom: 8px;
             }
 
+            /* No pre-wrap here: the summary is rendered Markdown, and the newlines
+               between its block elements would show up as blank lines. */
             .session-digest-body {
-                white-space: pre-wrap;
                 font-size: 13px;
                 line-height: 1.5;
+                user-select: text;
+                cursor: text;
             }
             .empty {
                 color: var(--text-muted);
@@ -319,6 +401,7 @@ export class HistoryView extends LitElement {
         searchQuery: { type: String },
         _thumbs: { state: true },
         _digesting: { state: true },
+        _copied: { state: true },
     };
 
     constructor() {
@@ -331,6 +414,8 @@ export class HistoryView extends LitElement {
         this.searchQuery = '';
         this._thumbs = new Map();
         this._digesting = false;
+        this._copied = false;
+        this._copiedTimer = null;
         this.loadSessions();
     }
 
@@ -354,6 +439,7 @@ export class HistoryView extends LitElement {
                 this.selectedSession = session;
                 this.selectedSessionId = sessionId;
                 this.activeTab = 'conversation';
+                this._resetCopied();
                 this.requestUpdate();
             }
         } catch (error) {
@@ -365,6 +451,18 @@ export class HistoryView extends LitElement {
         this.selectedSession = null;
         this.selectedSessionId = null;
         this.activeTab = 'conversation';
+        this._resetCopied();
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._resetCopied();
+    }
+
+    _resetCopied() {
+        if (this._copiedTimer) clearTimeout(this._copiedTimer);
+        this._copiedTimer = null;
+        this._copied = false;
     }
 
     handleSearchInput(e) {
@@ -426,6 +524,31 @@ export class HistoryView extends LitElement {
         });
     }
 
+    // Nothing in this view can be selected comfortably in a window this size, so the
+    // whole session is handed over at once, as the same Markdown written to disk.
+    _canCopySession() {
+        if (!this.selectedSession) return false;
+        return (this.selectedSession.events || []).length > 0 || Boolean(this.selectedSession.digest);
+    }
+
+    async handleCopySession() {
+        if (!this.selectedSessionId || !window.require) return;
+
+        const { ipcRenderer } = window.require('electron');
+        const result = await ipcRenderer.invoke('copy-session-markdown', this.selectedSessionId);
+        if (!result?.success) {
+            window.cheatingDaddy?.addNotice(`The session could not be copied: ${result?.error || 'unknown error'}`);
+            return;
+        }
+
+        if (this._copiedTimer) clearTimeout(this._copiedTimer);
+        this._copied = true;
+        this._copiedTimer = setTimeout(() => {
+            this._copied = false;
+            this._copiedTimer = null;
+        }, 2000);
+    }
+
     // A session the app never closed properly carries no pending mark, so it is
     // never picked up automatically. This is how it gets its summary (D24).
     async handleGenerateDigest() {
@@ -458,36 +581,100 @@ export class HistoryView extends LitElement {
             });
         }
         const src = this._thumbs.get(ref);
-        return src ? html`<img class="history-shot" src=${src} alt="Screen capture" />` : '';
+        return src ? html`<img class="shot" src=${src} alt="Screen capture" />` : '';
     }
 
     // Same projection as the live view (src/core/thread-view.js): segments chopped up
     // by the VAD are reread merged, exactly as they looked during the session.
-    collectConversation(session) {
+    getRows(session) {
         const project = window.threadView?.projectThread;
-        const rows = project ? project(session.events || []) : [];
-        const messages = [];
+        return project ? project(session?.events || []) : [];
+    }
 
-        for (const row of rows) {
-            if (row.kind === 'speech') {
-                messages.push({ type: row.speaker === 'me' ? 'me' : 'them', content: row.text, timestamp: row.t });
-            } else if (row.kind === 'ask') {
-                if (row.question) messages.push({ type: 'me', content: row.question, timestamp: row.t });
-                if (row.answer) messages.push({ type: 'ai', content: row.answer, timestamp: row.t });
+    clock(t) {
+        return window.threadView?.formatClock ? window.threadView.formatClock(t) : '';
+    }
+
+    // The same rows the live view paints, painted the same way. A turn is named and
+    // marked on its channel; a bubble said nothing about who was speaking.
+    renderRow(row) {
+        if (row.kind === 'speech') {
+            if (row.echo) {
+                return html`
+                    <div class="row row-echo">
+                        <div class="echo-label" title="Your microphone picked up the system audio">Duplicate audio · ${this.clock(row.t)}</div>
+                        <div class="said echo-text">${row.text}</div>
+                    </div>
+                `;
             }
+
+            return html`
+                <div class="row row-speech row-${row.speaker}">
+                    <div class="who">
+                        <span class="name">${SPEAKER_LABELS[row.speaker] || row.speaker}</span>
+                        <span class="clock">${this.clock(row.t)}</span>
+                    </div>
+                    <div class="said">${row.text}</div>
+                </div>
+            `;
         }
-        return messages;
+
+        if (row.kind === 'ask') {
+            return html`
+                <div class="row row-ask">
+                    <div class="ask-question">
+                        <div class="who">
+                            <span class="name">You asked</span>
+                            <span class="clock">${this.clock(row.t)}</span>
+                        </div>
+                        <div class="said">${row.question}</div>
+                        ${this.renderShot(row.imageRef)}
+                    </div>
+                    ${
+                        row.answer
+                            ? html`<div class="answer">
+                                  <div class="answer-tag">
+                                      <svg
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          stroke-width="2"
+                                          stroke-linecap="round"
+                                          stroke-linejoin="round"
+                                      >
+                                          <path d="M13 3v7h6l-8 11v-7H5z" />
+                                      </svg>
+                                      Assistant
+                                  </div>
+                                  ${markdownNode(row.answer)}
+                              </div>`
+                            : ''
+                    }
+                </div>
+            `;
+        }
+
+        if (row.kind === 'screen') {
+            return html`
+                <div class="row row-screen">
+                    <div class="caption">${row.caption || 'Screen captured'} · ${this.clock(row.t)}</div>
+                    ${this.renderShot(row.imageRef)}
+                </div>
+            `;
+        }
+
+        return '';
     }
 
     renderTabContent() {
         if (!this.selectedSession) return html`<div class="empty">Select a session.</div>`;
 
         if (this.activeTab === 'conversation') {
-            const messages = this.collectConversation(this.selectedSession);
+            const rows = this.getRows(this.selectedSession).filter(row => row.kind !== 'screen');
             const digest = this.selectedSession.digest;
             // A session with turns but no summary still has something to offer: the
             // button to generate one. Only a genuinely empty session is empty.
-            if (!messages.length && !digest) return html`<div class="empty">No conversation data.</div>`;
+            if (!rows.length && !digest) return html`<div class="empty">No conversation data.</div>`;
 
             // The summary comes first: usually it is the only thing worth rereading (M2).
             const resumen = !digest
@@ -502,35 +689,16 @@ export class HistoryView extends LitElement {
                   </div>`
                 : html`<div class="session-digest">
                       <div class="session-digest-title">Summary</div>
-                      <div class="session-digest-body">${digest}</div>
+                      <div class="session-digest-body">${markdownNode(digest)}</div>
                   </div>`;
 
-            return html`${resumen}${messages.map(
-                msg => html`
-                    <div class="message-row ${msg.type}">
-                        <div class="message">
-                            <div class="message-body">${msg.content}</div>
-                            <div class="message-meta">${this.formatTime(msg.timestamp)}</div>
-                        </div>
-                    </div>
-                `
-            )}`;
+            return html`${resumen}${rows.map(row => this.renderRow(row))}`;
         }
 
         if (this.activeTab === 'screen') {
             const screen = (this.selectedSession.events || []).filter(e => e.kind === 'screen');
             if (!screen.length) return html`<div class="empty">No screen analysis data.</div>`;
-            return screen.map(
-                entry => html`
-                    <div class="message-row screen">
-                        <div class="message">
-                            <div class="message-body">${entry.caption || 'Screen captured'}</div>
-                            ${this.renderShot(entry.imageRef)}
-                            <div class="message-meta">${this.formatTime(entry.t)}</div>
-                        </div>
-                    </div>
-                `
-            );
+            return screen.map(entry => this.renderRow({ kind: 'screen', t: entry.t, imageRef: entry.imageRef, caption: entry.caption }));
         }
 
         const profile = this.selectedSession.profile;
@@ -609,7 +777,7 @@ export class HistoryView extends LitElement {
     }
 
     renderDetailView() {
-        const conversationCount = this.collectConversation(this.selectedSession).length;
+        const conversationCount = this.getRows(this.selectedSession).filter(row => row.kind !== 'screen').length;
         const screenCount = (this.selectedSession?.events || []).filter(e => e.kind === 'screen').length;
 
         return html`
@@ -633,6 +801,14 @@ export class HistoryView extends LitElement {
                     >${this._getProfileLabel(this.selectedSession)} · ${this.formatDate(this.selectedSession.createdAt)} ·
                     ${this.formatTime(this.selectedSession.createdAt)}</span
                 >
+                <button
+                    class="copy-btn"
+                    ?disabled=${!this._canCopySession()}
+                    title="Copy the whole session as Markdown"
+                    @click=${() => this.handleCopySession()}
+                >
+                    ${this._copied ? 'Copied' : 'Copy'}
+                </button>
             </div>
             <div class="tab-row">
                 <button

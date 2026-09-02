@@ -1572,6 +1572,31 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         return { sessionId, events };
     });
 
+    // Copying a session hands over the same document `writeTranscript` puts on disk,
+    // rendered on the spot rather than read back from `transcript.md`: sessions
+    // stored before that file existed do not have one, and a summary generated later
+    // from the history view is not in it either.
+    ipcMain.handle('copy-session-markdown', async (event, sessionId) => {
+        try {
+            const stored = getSession(sessionId);
+            if (!stored) return { success: false, error: 'Session not found' };
+
+            const { clipboard } = require('electron');
+            clipboard.writeText(
+                renderTranscriptMarkdown({
+                    sessionId,
+                    profileName: stored.profileName || stored.profile || null,
+                    events: stored.events || [],
+                    digest: stored.digest ?? null,
+                })
+            );
+            return { success: true };
+        } catch (error) {
+            console.error('Could not copy the session:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     // Any stored session can be summarised on request: a session the app never got
     // to close properly carries no pending mark, so this is its way back (D24).
     ipcMain.handle('generate-session-digest', async (event, sessionId) => {
