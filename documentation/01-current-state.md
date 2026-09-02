@@ -13,15 +13,15 @@ Available profiles: interview, sales, meeting, presentation, negotiation, exam.
 
 ## Technical inventory
 
-| Aspect       | State                                                                    |
-| ------------ | ------------------------------------------------------------------------ |
-| Modules      | **CommonJS** (no `"type"` in `package.json`)                             |
-| Build        | **None** — no webpack, vite, rollup, esbuild or TypeScript               |
-| Runtime      | Electron `^30` → **Node 20**                                             |
-| UI           | **Lit** loaded as an asset (`src/assets/lit-core-2.7.4.min.js`), not npm |
-| Dependencies | `@google/genai`, `ws`, `electron-squirrel-startup`                       |
-| Tests        | None                                                                     |
-| Lint         | None (`npm run lint` prints "No linting configured")                     |
+| Aspect       | State                                                                         |
+| ------------ | ----------------------------------------------------------------------------- |
+| Modules      | **CommonJS** (no `"type"` in `package.json`)                                  |
+| Build        | **None** — no webpack, vite, rollup, esbuild or TypeScript                    |
+| Runtime      | Electron `^30` → **Node 20** _(upgraded to 44 / Node 24 after this analysis)_ |
+| UI           | **Lit** loaded as an asset (`src/assets/lit-core-2.7.4.min.js`), not npm      |
+| Dependencies | `@google/genai`, `ws`, `electron-squirrel-startup`                            |
+| Tests        | None                                                                          |
+| Lint         | None (`bun run lint` prints "No linting configured")                          |
 
 One consequence matters a lot: the **main process is CommonJS on Node 20**, where
 `require()` of an ESM package does not work. The **renderer is a browser context

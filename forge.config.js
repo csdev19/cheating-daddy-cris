@@ -6,6 +6,14 @@ module.exports = {
         asar: true,
         extraResource: ['./src/assets/SystemAudioDump'],
         name: 'Cheating Daddy',
+        // macOS keys Screen Recording and Microphone permission to this identifier.
+        // Without it the app inherits Electron's default, so the grant is tied to
+        // something generic and changes shape between builds. Reverse-DNS is the
+        // convention Apple expects, and notarisation is fussier without it.
+        //
+        // This only affects the packaged app: in development Electron runs from
+        // node_modules with the identifier `Electron`, which no config can change.
+        appBundleId: 'com.csdev19.screen-assistant',
         icon: 'src/assets/logo',
         // use `security find-identity -v -p codesigning` to find your identity
         // for macos signing

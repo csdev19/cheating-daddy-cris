@@ -4,6 +4,7 @@
     "version": "0.8.0",
     "description": "cheating daddy",
     "main": "src/index.js",
+    "packageManager": "bun@1.3.4",
     "scripts": {
         "start": "electron-forge start",
         "package": "electron-forge package",
@@ -41,6 +42,6 @@
         "@electron-forge/plugin-fuses": "^7.8.1",
         "@electron/fuses": "^1.8.0",
         "@reforged/maker-appimage": "^5.0.0",
-        "electron": "^30.0.5"
+        "electron": "^44.0.0"
     }
 }

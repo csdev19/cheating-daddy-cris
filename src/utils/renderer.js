@@ -167,6 +167,12 @@ async function listProfiles() {
     return result.success ? result.data : [];
 }
 
+// The screens available for capture, for the settings dropdown.
+async function listDisplays() {
+    const result = await ipcRenderer.invoke('list-displays');
+    return result.success ? result.data : [];
+}
+
 // Single session entry point. The renderer no longer picks a provider: it sends the
 // profile and main resolves transcription and reasoning as separate axes (D14).
 async function initializeSession(profileName = 'interview') {
@@ -1057,6 +1063,7 @@ const cheatingDaddy = {
     // Core functionality
     initializeSession,
     listProfiles,
+    listDisplays,
     cancelLocalInitialization,
     startCapture,
     stopCapture,

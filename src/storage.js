@@ -45,6 +45,9 @@ const DEFAULT_PREFERENCES = {
     // anyway. Whisper works in 30 s windows, so anything under that costs one pass;
     // lower means you see text sooner and more sentences get split. See D22.
     maxSegmentSeconds: 12,
+    // Which screen screenshots come from. `auto` means the primary display; the
+    // choice is made once here, never with a dialog at session start (D29).
+    captureDisplayId: 'auto',
 };
 
 const DEFAULT_KEYBINDS = null; // null means use system defaults

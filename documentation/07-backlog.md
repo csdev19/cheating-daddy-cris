@@ -20,6 +20,22 @@ it on the next launch. The cost is continuous audio writes for the whole meeting
 and real recovery logic. Deliberately deferred: at 12 s the exposure is small, and
 the transcript of everything already spoken is safe.
 
+### Code signing with a Developer ID
+
+`appBundleId` is set, so the packaged app's `Info.plist` carries
+`com.csdev19.screen-assistant`. But the build is ad-hoc signed and `codesign -dv`
+still reports `com.github.Electron`, so the identity macOS sees is not consistent
+end to end. Fixing it means enabling `osxSign` in `forge.config.js` with a real
+Developer ID, and notarisation after that. Until then, permission grants are less
+stable than they look. See D29.
+
+### Context preview before starting a session (M3)
+
+From the audit. Before starting, show which profile, which `context/` files and how
+many tokens are about to be sent. It removes a silent failure mode — a note saved as
+`.txt` is never loaded, since the loader only reads `.md`, and you find out
+mid-meeting. Small, and not built.
+
 ### Gemini implicit caching is not confirmed working
 
 B4 from the audit. A real session logged `cachedContentTokenCount: 0 of 197`. That
@@ -50,17 +66,28 @@ that already exist.
 
 ---
 
+## Open
+
+### Monorepo, when there is a second consumer of `core`
+
+The rest of the workspace is bun monorepos shaped `apps/*` / `packages/*`.
+`src/core/` is already package-shaped: pure, no Electron, no dependencies, fully
+tested. Two things are unresolved (D28): electron-forge bundles `node_modules` from
+the project root into the asar, and a workspace hoists to the repo root, so
+packaging from inside one needs testing; and the shared catalog pins a
+TypeScript/vite/tailwind stack this project does not use by decision (D19). Worth
+doing when something else needs to consume `core`.
+
+---
+
 ## Shipped
 
-### Electron upgrade
+### Electron 30 → 44 (D27)
 
-Electron 30 is Node 20 and Chrome 124. Electron 44 is Node 24 and Chrome 152, and
-brings `node:sqlite` in the standard library.
+Node 20 → 24, Chrome 124 → 152. Cheap because the app ships no native modules; the
+only two in the tree are build-time, from `maker-dmg`.
 
-Cheaper than it looks: the app ships **no native modules** — the only two in the
-tree come from `@electron-forge/maker-dmg` and are build-time only. The usual
-blocker does not apply here.
-
-The thing to re-verify is H1, the undetectable window, which is the most valuable
-thing in the repo: content protection, transparency and always-on-top. Content
-protection was already observed working on Electron 44 during an unrelated test.
+H1 was re-verified on 44 with the app running: its window is absent from a
+full-screen capture taken by a separate process. Two earlier decisions were
+revisited rather than left stale — D10 lost one of its four arguments, and D26's
+rejection of SQLite now rests on fit rather than availability.

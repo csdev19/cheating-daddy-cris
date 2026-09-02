@@ -691,6 +691,9 @@ export class CheatingDaddyApp extends LitElement {
                 this.digestSaving = false;
                 if (!result?.success) this.addNotice(`The session summary could not be saved: ${result?.error || 'unknown error'}`);
             });
+            ipcRenderer.on('capture-display-fallback', () => {
+                this.addNotice('The screen you chose for captures is not connected. Using the primary display instead.');
+            });
             ipcRenderer.on('echo-detected', () => {
                 this.addNotice('Your microphone is picking up the system audio. Use headphones and the duplicate turns will stop.');
             });

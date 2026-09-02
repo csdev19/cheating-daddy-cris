@@ -490,8 +490,8 @@ there is no debounce, and a crash costs at most the line being written. A torn
 final line is skipped on read and everything before it survives — verified by
 truncating a log on purpose.
 
-**Why not SQLite:** it was the obvious suggestion and it does not fit. Electron 30
-is Node 20, where `node:sqlite` does not exist, so it would mean a native
+**Why not SQLite:** it was the obvious suggestion and it does not fit. At the time
+Electron 30 meant Node 20, where `node:sqlite` does not exist, so it would mean a native
 dependency against a recorded constraint. More to the point, for this workload —
 append events, read one session whole — an append-only log gives the same crash
 durability, and the data stays as files the person can read, grep, back up and sync
@@ -516,3 +516,146 @@ truth.
 **Still not covered:** audio captured but not yet transcribed — up to
 `maxSegmentSeconds` in the VAD plus whatever is queued for Whisper — is not on disk
 in any form, and no storage choice would change that.
+
+---
+
+## D27 — Electron 44, and what that changes about earlier decisions
+
+**Decision:** upgrade Electron 30 → 44, which moves the main process from Node 20
+and Chrome 124 to Node 24 and Chrome 152.
+
+**Why it was cheap:** the app ships **no native modules**. The only two in the tree
+come from `@electron-forge/maker-dmg` and exist to build the installer, never to
+run. The usual reason Electron upgrades hurt did not apply.
+
+**What was verified rather than assumed:** H1, the undetectable window, is the most
+valuable thing in the repo, so it was tested before and after. With the app running
+on 44, its window is absent from a full-screen `desktopCapturer` capture taken from
+a separate process — the same test that shows a control window appearing when
+content protection is switched off.
+
+**What this changes about D10 (TanStack AI, rejected):** one of the four reasons was
+that it is pure ESM while the main process is CommonJS on Node 20, where
+`require(esm)` does not work. **That reason is now gone** — Node 24 supports it. The
+other three stand: it is pre-1.0, its Anthropic adapter does not document image
+input, and the project is consolidating towards one provider rather than spreading
+across eleven. The decision does not change; one of its arguments no longer holds
+and should not be cited.
+
+**Two macOS consequences that only appear on upgrading, neither of them bugs:**
+
+1. **The native screen-share picker starts appearing.** `setDisplayMediaRequestHandler`
+   has carried `useSystemPicker: true` since upstream added it in 2025. Electron 30
+   ignored it; Electron 44 honours it on macOS 15+, and per Electron's docs "if the
+   system picker is available and `useSystemPicker` is set to `true`, the handler
+   will not be invoked" — macOS shows its own dialog instead. For an overlay meant
+   to go unnoticed that is a prompt on every session, visible to everyone if the
+   screen is already being shared. The flag is now explicitly `false`, restoring the
+   silent whole-screen capture.
+
+2. **Screen Recording permission is requested again.** The development Electron
+   bundle is ad-hoc signed (`Identifier=Electron`, no team identifier), so macOS
+   keys the permission to that specific binary. A new Electron version is a new
+   binary, so the grant does not carry over. Launched from a terminal, macOS
+   attributes the request to the ancestor process, which is why the prompt names the
+   terminal rather than the app. One-time, and only in development — a packaged,
+   signed build has a stable identity.
+
+**What this changes about D26 (storage):** `node:sqlite` is now available with no
+new dependency. It still is not adopted, and the reason is no longer availability
+but fit: for appending events and reading one session whole, an append-only log
+gives the same crash durability while the data stays as files the person can read,
+grep, back up and sync. That argument is unaffected by the upgrade.
+
+---
+
+## D28 — bun as the package manager
+
+**Decision:** bun replaces npm. `package.json` declares `packageManager: bun@1.3.4`
+and `bun.lock` is committed. `bun run <script>` is the canonical way to run
+anything.
+
+**Why bun and not pnpm:** on strictness alone pnpm wins — it blocks every install
+script by default, including native builds, and the allowlist is declarative and
+reviewable. But twelve of the thirteen projects in this workspace already use bun
+with the same `apps/*` / `packages/*` shape and a shared catalog. Being the odd one
+out costs more day to day than that margin is worth.
+
+**The security argument, stated honestly:** changing package manager does not change
+the supply chain. All of them install the same tarballs from the same registry. What
+changes is who may execute code on the machine at install time. npm runs every
+lifecycle script without asking; bun blocks untrusted ones by default. Here that is
+two — `@google/genai`, whose `preinstall` is literally `echo 'preinstall: no-op'`,
+and `protobufjs`. Both stay blocked and the full suite passes.
+
+**Verified before switching, not after:** `bun install` (538 packages, 1.5 s),
+197/197 tests, the app boots, and `bun run make` produces a working 126 MB DMG with
+the runtime dependencies correctly bundled inside `app.asar`. Packaging was the real
+risk and it was checked first.
+
+`node_modules` drops from 428 MB to 200 MB.
+
+**Known rough edge:** electron-forge 7.8.1 does not know about bun and reports
+`Found npm` at startup. Nothing depends on it in the current flow — packaging
+works — but if forge ever needs to install on its own it would reach for npm.
+
+**Use `bun run test`, not `bun test`.** Both pass, but the first runs `node --test`
+while the second uses bun's own runtime. The app runs on Node inside Electron, so
+tests should too, or a Node-specific difference could hide until production.
+
+**Not a monorepo, for now.** The other projects are monorepos, and `src/core/` is
+genuinely package-shaped — pure, no Electron, no dependencies, fully tested. But
+forge bundles `node_modules` from the project root into the asar, and a workspace
+hoists dependencies to the repo root, so packaging from inside a workspace needs
+work that has not been done or tested. And the shared catalog pins TypeScript, vite
+and tailwind, none of which this project uses by decision (D19). It becomes worth
+doing when a second consumer of `core` exists.
+
+---
+
+## D29 — The capture screen is a setting, and the app has its own identifier
+
+**Decision:** which screen screenshots come from is chosen once in preferences
+(`captureDisplayId`, default `auto` = primary display). The packaged app declares
+`appBundleId: com.csdev19.screen-assistant`.
+
+### The screen selector
+
+**Why a setting and not a picker:** D27 turned off macOS's native picker because it
+interrupts every session with a dialog everyone in the call can see. Replacing it
+with our own dialog would repeat the mistake. The choice is made once, in settings,
+and never asked again.
+
+**When the chosen screen is gone** — an external monitor left at home — the capture
+falls back to the primary display **and says so**. Capturing a different screen in
+silence would be worse than the problem the setting exists to solve, and refusing to
+capture would fail at the exact moment the shortcut is pressed.
+
+**One detail that silently breaks this:** `desktopCapturer` reports `display_id` as
+a string while `screen` reports `id` as a number. Compared raw they never match, and
+every choice would look like a missing display. `core/display-choice.js` normalises
+both and has a test for it.
+
+**Not verified with hardware:** the development machine has one display. The logic is
+covered by tests; the two-monitor behaviour has not been observed.
+
+### The bundle identifier
+
+macOS keys Screen Recording and Microphone permission to an app's identity. Without
+`appBundleId` the packaged app inherits Electron's default, so the grant is tied to
+something generic.
+
+**Verified:** the packaged app's `Info.plist` now reads
+`CFBundleIdentifier: com.csdev19.screen-assistant`.
+
+**What this does not fix, stated plainly:**
+
+1. **Development still prompts on every Electron upgrade.** In development the app
+   runs from `node_modules` with the identifier `Electron`, which no configuration
+   changes. This only affects the packaged app.
+2. **The code signature still says `com.github.Electron`.** The build is ad-hoc
+   signed, and `codesign -dv` reports the generic identifier even though the
+   Info.plist is correct. Making the identity consistent end to end needs real
+   signing through `osxSign`, which is commented out in `forge.config.js`.
+
+So `appBundleId` is necessary but not sufficient. It is the half that costs nothing.
