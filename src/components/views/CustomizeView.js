@@ -216,7 +216,6 @@ export class CustomizeView extends LitElement {
         this.backgroundTransparency = 0.8;
         this.fontSize = 20;
         this.audioMode = 'speaker_only';
-        this.customPrompt = '';
         this.theme = 'dark';
         this._loadFromStorage();
     }
@@ -232,7 +231,6 @@ export class CustomizeView extends LitElement {
             this.backgroundTransparency = prefs.backgroundTransparency ?? 0.8;
             this.fontSize = prefs.fontSize ?? 20;
             this.audioMode = prefs.audioMode ?? 'speaker_only';
-            this.customPrompt = prefs.customPrompt ?? '';
             this.theme = prefs.theme ?? 'dark';
             if (keybinds) {
                 this.keybinds = { ...this.getDefaultKeybinds(), ...keybinds };
@@ -345,11 +343,6 @@ export class CustomizeView extends LitElement {
     handleLayoutModeSelect(e) {
         this.layoutMode = e.target.value;
         this.onLayoutModeChange(this.layoutMode);
-    }
-
-    async handleCustomPromptInput(e) {
-        this.customPrompt = e.target.value;
-        await cheatingDaddy.storage.updatePreference('customPrompt', this.customPrompt);
     }
 
     async handleAudioModeSelect(e) {
@@ -475,9 +468,11 @@ export class CustomizeView extends LitElement {
         this.clearStatusType = '';
         this.requestUpdate();
         try {
-            // Restore all preferences to defaults
+            // Restore all preferences to defaults. `customPrompt` is deliberately
+            // absent: it is a legacy value kept only so an install that predates
+            // profiles can still migrate it once, and resetting it would throw that
+            // text away before it was ever moved (D31).
             const defaults = {
-                customPrompt: '',
                 selectedProfile: 'interview',
                 selectedLanguage: 'en-US',
                 selectedScreenshotInterval: '5',
@@ -508,7 +503,6 @@ export class CustomizeView extends LitElement {
             this.fontSize = defaults.fontSize;
             this.backgroundTransparency = defaults.backgroundTransparency;
             this.googleSearchEnabled = defaults.googleSearchEnabled;
-            this.customPrompt = defaults.customPrompt;
             this.theme = defaults.theme;
 
             // Notify parent callbacks

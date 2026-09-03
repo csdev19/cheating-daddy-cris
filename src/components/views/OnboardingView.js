@@ -147,6 +147,7 @@ export class OnboardingView extends LitElement {
     static properties = {
         currentSlide: { type: Number },
         contextText: { type: String },
+        contextError: { type: String },
         onComplete: { type: Function },
     };
 
@@ -154,6 +155,7 @@ export class OnboardingView extends LitElement {
         super();
         this.currentSlide = 0;
         this.contextText = '';
+        this.contextError = '';
         this.onComplete = () => {};
         this._animId = null;
         this._time = 0;
@@ -373,11 +375,49 @@ export class OnboardingView extends LitElement {
     }
 
     async completeOnboarding() {
-        if (this.contextText.trim()) {
-            await cheatingDaddy.storage.updatePreference('customPrompt', this.contextText.trim());
-        }
+        const text = this.contextText.trim();
+
+        // This used to be written into `prefs.customPrompt`, which no model has read
+        // since profiles landed: the text was accepted and then ignored (D31). It
+        // now goes into the selected profile's notes, where the model looks.
+        if (text && !(await this._saveContextNote(text))) return;
+
         await cheatingDaddy.storage.updateConfig('onboarded', true);
         this.onComplete();
+    }
+
+    async _saveContextNote(text) {
+        this.contextError = '';
+
+        try {
+            const [prefs, profiles] = await Promise.all([cheatingDaddy.storage.getPreferences(), cheatingDaddy.listProfiles()]);
+            const slug = profiles.some(p => p.dir === prefs.selectedProfile) ? prefs.selectedProfile : (profiles[0] || {}).dir;
+
+            if (!slug) {
+                this.contextError = 'There is no profile to save this into yet.';
+                return false;
+            }
+
+            // A note by that name may already exist. Theirs is never overwritten.
+            for (let attempt = 0; attempt < 5; attempt++) {
+                const name = attempt === 0 ? 'onboarding.md' : `onboarding-${attempt + 1}.md`;
+                const result = await cheatingDaddy.profiles.writeNote(slug, name, `${text}\n`, null);
+
+                if (result.success) return true;
+                if (result.code !== 'NOTE_EXISTS') {
+                    this.contextError = result.error;
+                    return false;
+                }
+            }
+
+            this.contextError = 'Could not find a free name for this note.';
+            return false;
+        } catch (error) {
+            // Onboarding stays open rather than being marked done: finishing here
+            // would lose the text with nothing to show for it.
+            this.contextError = error.message;
+            return false;
+        }
     }
 
     renderSlide() {
@@ -410,6 +450,7 @@ export class OnboardingView extends LitElement {
                     .value=${this.contextText}
                     @input=${this.handleContextInput}
                 ></textarea>
+                ${this.contextError ? html`<div class="slide-text" style="color:#f14c4c">${this.contextError}</div>` : ''}
                 <div class="actions">
                     <button class="btn-primary" @click=${this.completeOnboarding}>Get Started</button>
                     <button

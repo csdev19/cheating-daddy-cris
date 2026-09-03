@@ -167,6 +167,20 @@ async function listProfiles() {
     return result.success ? result.data : [];
 }
 
+// The profile editor (D30). Unlike the other bridges this one hands the whole
+// envelope back: the view branches on `code` — a conflict is not a failure it can
+// retry, it is a question for the person.
+const profiles = {
+    read: slug => ipcRenderer.invoke('profiles:read', { slug }),
+    write: (slug, profile, expectedRevision) => ipcRenderer.invoke('profiles:write', { slug, profile, expectedRevision }),
+    writeChecklist: (slug, items, expectedRevision) => ipcRenderer.invoke('profiles:write-checklist', { slug, items, expectedRevision }),
+    writeNote: (slug, noteName, content, expectedRevision) =>
+        ipcRenderer.invoke('profiles:write-note', { slug, noteName, content, expectedRevision }),
+    deleteNote: (slug, noteName, expectedRevision) => ipcRenderer.invoke('profiles:delete-note', { slug, noteName, expectedRevision }),
+    create: displayName => ipcRenderer.invoke('profiles:create', { displayName }),
+    remove: slug => ipcRenderer.invoke('profiles:delete', { slug }),
+};
+
 // The screens available for capture, for the settings dropdown.
 async function listDisplays() {
     const result = await ipcRenderer.invoke('list-displays');
@@ -1063,6 +1077,7 @@ const cheatingDaddy = {
     // Core functionality
     initializeSession,
     listProfiles,
+    profiles,
     listDisplays,
     cancelLocalInitialization,
     startCapture,

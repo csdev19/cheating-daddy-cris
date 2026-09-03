@@ -138,7 +138,9 @@ export class HistoryView extends LitElement {
                 font-size: var(--font-size-xs);
                 cursor: pointer;
                 white-space: nowrap;
-                transition: color var(--transition), border-color var(--transition);
+                transition:
+                    color var(--transition),
+                    border-color var(--transition);
             }
 
             .copy-btn:hover:not(:disabled) {
@@ -416,7 +418,9 @@ export class HistoryView extends LitElement {
         this._digesting = false;
         this._copied = false;
         this._copiedTimer = null;
+        this._profileNames = null;
         this.loadSessions();
+        this._loadProfileNames();
     }
 
     async loadSessions() {
@@ -485,20 +489,26 @@ export class HistoryView extends LitElement {
     }
 
     getProfileNames() {
-        return {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
-        };
+        return this._profileNames || {};
+    }
+
+    // Read from disk, like the picker and the profile editor. The map that used to
+    // live here listed profiles that no longer exist and could not name one the
+    // person created, so a renamed profile showed as its folder slug and a deleted
+    // one as a name from a different app entirely.
+    async _loadProfileNames() {
+        try {
+            const profiles = await cheatingDaddy.listProfiles();
+            this._profileNames = Object.fromEntries(profiles.map(profile => [profile.dir, profile.name]));
+            this.requestUpdate();
+        } catch (error) {
+            console.error('Could not read the profile names:', error);
+        }
     }
 
     _getProfileLabel(session) {
         if (session.profile) {
-            const names = this.getProfileNames();
-            return names[session.profile] || session.profile;
+            return this.getProfileNames()[session.profile] || session.profile;
         }
         return 'Session';
     }

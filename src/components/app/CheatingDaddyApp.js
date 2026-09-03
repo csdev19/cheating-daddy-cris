@@ -5,7 +5,7 @@ import { HelpView } from '../views/HelpView.js';
 import { HistoryView } from '../views/HistoryView.js';
 import { AssistantView } from '../views/AssistantView.js';
 import { OnboardingView } from '../views/OnboardingView.js';
-import { AICustomizeView } from '../views/AICustomizeView.js';
+import { ProfilesView } from '../views/ProfilesView.js';
 import { FeedbackView } from '../views/FeedbackView.js';
 
 export class CheatingDaddyApp extends LitElement {
@@ -1011,13 +1011,15 @@ export class CheatingDaddyApp extends LitElement {
                     ></main-view>
                 `;
 
-            case 'ai-customize':
+            case 'profiles':
                 return html`
-                    <ai-customize-view
+                    <profiles-view
                         .selectedProfile=${this.selectedProfile}
                         .availableProfiles=${this.availableProfiles}
+                        .sessionActive=${this.sessionActive}
                         .onProfileChange=${p => this.handleProfileChange(p)}
-                    ></ai-customize-view>
+                        .onProfilesChanged=${() => this.loadProfiles()}
+                    ></profiles-view>
                 `;
 
             case 'customize':
@@ -1079,8 +1081,8 @@ export class CheatingDaddyApp extends LitElement {
                 </svg>`,
             },
             {
-                id: 'ai-customize',
-                label: 'AI Customization',
+                id: 'profiles',
+                label: 'Profiles',
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <path
                         fill="none"

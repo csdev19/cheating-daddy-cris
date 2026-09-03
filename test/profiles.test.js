@@ -202,7 +202,8 @@ test('readProfileForEditing returns the editable profile and a revision per file
 
     assert.ok(revisions['profile.md'], 'profile.md must carry a revision');
     assert.ok(revisions['checklist.md']);
-    assert.ok(revisions[path.join('context', 'cv.md')]);
+    assert.ok(revisions['context/cv.md'], 'a note revision is keyed by id, not by platform path');
+    assert.strictEqual(profile.notes[0].revision, revisions['context/cv.md']);
 });
 
 test('writeProfile saves the four managed fields in a single document', () => {
@@ -321,7 +322,7 @@ test('writeNote refuses to create a note that already exists', () => {
 test('deleteNote removes only the note it was given, and only with a fresh revision', () => {
     const root = makeWritableProfile();
     const { revisions } = readProfileForEditing(root, 'interview');
-    const key = path.join('context', 'cv.md');
+    const key = 'context/cv.md';
 
     assert.throws(
         () => deleteNote({ profilesDir: root, slug: 'interview', noteName: '../../cv.md', expectedRevision: revisions[key] }),

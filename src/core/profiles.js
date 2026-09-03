@@ -343,8 +343,12 @@ function readProfileForEditing(profilesDir, slug) {
             .filter(f => f.endsWith('.md'))
             .sort()) {
             const content = fs.readFileSync(path.join(contextDir, file), 'utf8');
-            notes.push({ name: file, content, bytes: Buffer.byteLength(content) });
-            revisions[path.join('context', file)] = revisionOf(path.join(contextDir, file));
+            const revision = revisionOf(path.join(contextDir, file));
+
+            // Keyed with a forward slash on every platform: this is an id the
+            // renderer holds, not a path it may ever resolve.
+            notes.push({ name: file, content, bytes: Buffer.byteLength(content), revision });
+            revisions[`context/${file}`] = revision;
         }
     }
 
