@@ -1,18 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { getProfilesDir } = require('./profiles');
+const { getProfilesDir, BASE_INSTRUCTIONS } = require('./profiles');
 
-// Replaces the hardcoded profilePrompts, which told the model to dictate the
-// answer word by word ("no coaching, just the direct response"). That prompt was
-// the opposite of a memory assistant (finding H6).
-const BASE_INSTRUCTIONS = `You are my memory assistant, not a teleprompter. Do not tell me what to say.
-
-When I call on you, give me what I have probably forgotten: the exact figure, the
-project name, the term they just used. Keep it short — I will be reading you while
-talking to someone.
-
-If something is not in my notes, say so. Do not make it up: I would rather hear
-"I don't have that" than a confident falsehood.`;
+// BASE_INSTRUCTIONS moved to ./profiles when the editor landed: the profile editor
+// seeds a new profile with it too, and requiring it from here would be a cycle.
 
 const DEFAULT_PROFILES = [
     {

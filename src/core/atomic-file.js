@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,7 +13,10 @@ function writeFileAtomic(filePath, contents) {
     const dir = path.dirname(filePath);
     fs.mkdirSync(dir, { recursive: true });
 
-    const temporaryPath = path.join(dir, `.${path.basename(filePath)}.tmp-${process.pid}`);
+    // Unique per call, not just per process: the profile editor can have writes to
+    // different files in flight at once, and a failed cleanup must never remove the
+    // temporary file another write is still using.
+    const temporaryPath = path.join(dir, `.${path.basename(filePath)}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
     try {
         fs.writeFileSync(temporaryPath, contents, 'utf8');
         fs.renameSync(temporaryPath, filePath);
