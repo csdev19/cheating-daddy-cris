@@ -118,6 +118,10 @@ it is not hardcoded.
 with embeddings (see D8); loading loose files per session (does not accumulate
 reusable memory across meetings of the same kind).
 
+**Revised by D30.** The format below stands unchanged. What did not survive contact
+with the app is the "no authoring UI needs to be built" half: one was built anyway,
+bound to a preference no model reads.
+
 ---
 
 ## D8 — No RAG, no embeddings
@@ -659,3 +663,135 @@ something generic.
    signing through `osxSign`, which is commented out in `forge.config.js`.
 
 So `appBundleId` is necessary but not sufficient. It is the half that costs nothing.
+
+---
+
+## D30 — A profile editor in the app, with the folder still the source of truth _(revision of D7)_
+
+**Decision:** the app gets a screen that creates, edits, renames the _display name_
+and deletes profiles, writing the same markdown folders D7 defines. The folder stays the source
+of truth. The editor is one more writer of files you can still open in any editor,
+not a database that owns them.
+
+**Why D7's reasoning no longer holds.** D7 rejected an authoring UI on one
+argument: "no authoring UI needs to be built — you write in your editor". The app
+shipped one anyway, and it was decorative. `AICustomizeView` puts a profile
+selector next to a textarea, which suggests the text belongs to the selected
+profile. It does not. The textarea is bound to `prefs.customPrompt`, a single
+global preference, written on every keystroke with no indication, and read by
+exactly one caller: `bootstrapProfiles`, once, on first launch. Every answer the
+model gives is built from `profile.instructions`, `profile.contextFiles` and
+`profile.checklist` (`core/payload.js`), and even the Live session receives
+`profile.instructions` (`gemini.js:1374`).
+
+So switching profile did not change the text because the text never belonged to a
+profile, and nothing typed there had reached a model since the profiles landed.
+
+The real choice was never "editor or no editor". The app already had one. It was
+"an honest editor or a lying one".
+
+**What does not change:** the on-disk format, every `context/*.md` sent whole (D8),
+and the profile snapshotted once at session start (`core/session.js`).
+
+**Three sub-decisions that carry the risk:**
+
+**The folder slug is immutable; only the display name is editable.** `session.json`
+records the slug — `"profile": "interview"` — and the history resolves it back to a
+name. Renaming a folder would orphan every stored session that used it. "Rename"
+therefore edits `name:` in the frontmatter; the slug is derived from the name once,
+at creation, and never again. The UI shows the slug so it is not a hidden concept
+that bites later.
+
+**The editor is read-only while a session runs.** `sessionManager.start()` snapshots
+the profile, and the payload's stable prefix must not change between calls or prompt
+caching is invalidated mid-meeting. Allowing edits that silently do not apply, or
+that apply halfway through a thread, both produce a record that misstates what
+produced the answers. The screen disables itself and says why.
+
+**Autosave per region, atomic, with visible state.** The complaint that opened this
+was "when does it save?". Each region — `profile.md`, one note, or the checklist —
+carries its own `Saving… / Saved HH:MM / Save failed` state, and every write goes
+through `atomic-file.js`, the same temp-and-rename used for session metadata (D26).
+A crash mid-save cannot leave a torn `profile.md` that breaks the next session start.
+The visible name, model, confidential flag and instructions are separately editable,
+but all live in `profile.md`; their writes must be serialized as one document or an
+old debounce can erase a newer field. Atomic replacement alone does not solve that.
+
+**Manual edits do not lose to autosave.** Being the source of truth is meaningful
+only if editing a file outside the app is safe. Reads return a revision fingerprint;
+writes compare it with the current file and reject a mismatch. The editor keeps the
+draft and offers reload/copy rather than silently overwriting the external edit.
+This is optimistic concurrency, not file watching or bidirectional sync.
+
+**Rejected alternatives:** a modal editor over a profile list — it implies
+commit-on-close, which contradicts autosave, and it hides the other profiles while
+you work. Editing profiles only by hand in Finder, as D7 assumed — that is the
+status quo plus deleting the broken screen, which leaves a person with no way to
+discover that profiles are folders at all.
+
+**Consequences:** `core/profiles.js` gains a write half, and its serializer has to
+stay symmetric with `parseFrontmatter` — the reason both live in one module — while
+preserving unknown hand-authored frontmatter rather than normalising it away. Profile
+and note creation reject empty/colliding slugs and construct a complete temporary
+folder before its single rename into place. The IPC boundary accepts ids, never file
+paths, and validates containment below `profiles/`. The app gains code that can
+delete a person's own notes, so deletion needs guards and a confirmation rather than
+a button. The main process enforces the live-session lock too; a disabled renderer is
+not an authority boundary.
+
+The detached digest from D17 is another writer. Deleting its target profile marks
+its pending digest cancelled before removal; an in-flight provider call may finish,
+but it must check cancellation and must never create a missing profile. That prevents
+a late model response from resurrecting a deleted folder while keeping deletion
+prompt. `session.json` records `digestCancelled: true`, which D24 must skip on
+startup. `appendDigest` is atomic too and reads `history.md` at append time. Checklist
+edits reject empty or duplicate slug-derived ids, since those ids identify checklist
+events in a session.
+
+**Non-goals:** versioning or undo of profile edits; syncing profiles between
+machines; a rich-text editor; editing a profile mid-session; reassigning a stored
+session to a different profile (that one is in the backlog and stays there, because
+the record would then claim something that did not happen).
+
+**When to reopen:** if profile authoring grows past plain files — shared templates,
+a registry, multi-device sync — the folder-as-truth premise is the first thing to
+re-examine, not the editor built on it.
+
+---
+
+## D31 — `customPrompt` is retired
+
+**Decision:** `prefs.customPrompt` stops being written by anything. It survives as a
+read-only legacy field, consumed only by a one-time migration in
+`bootstrapProfiles`.
+
+**Why:** it is dead, and this was measured rather than assumed. The only preference
+consumer is `index.js:28`, which copies it into `context/migrated.md` during the
+one-time migration. Meanwhile three screens write to it: `AICustomizeView.js:70`, `CustomizeView.js:352` and
+`OnboardingView.js:377`. A field that three screens write and nothing reads is worse
+than no field at all: it makes the app look configurable exactly where it is not,
+which is the bug that produced D30.
+
+**What happens to each writer:** `AICustomizeView` is replaced by the profile
+editor. `CustomizeView`'s duplicate textarea is removed; that screen keeps keybinds
+and preferences. Onboarding's context box writes `context/onboarding.md` into the
+selected profile — the same place the profile editor writes, and a place the model
+actually reads.
+
+**Consequences:** someone upgrading from a version that predates profiles still gets
+their old prompt migrated once, because the read path is untouched. The migration is
+not coupled to "profiles directory was just created": it has its own completion
+marker written only after `migrated.md` is safely stored. That protects an install
+where profiles appeared in an earlier release but the user continued typing in the
+old UI. Installs that already migrated keep the `migrated.md` they have. The fourth
+writer, Settings → Restore defaults, also stops resetting this legacy value.
+
+**Scope guard:** this retires the _preference_ `prefs.customPrompt`, not every
+similarly named compatibility value. `session.json.customPrompt` remains readable for
+pre-thread historical sessions, and the legacy Live-session parameters can be
+untangled separately. A repository-wide delete/rename would needlessly make old
+history lose its displayed context.
+
+**Non-goal:** removing the key from the preferences schema. It stays, documented as
+legacy, until the migration path itself is retired — deleting it now would silently
+drop the prompt of anyone who has not launched the new version yet.

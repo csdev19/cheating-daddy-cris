@@ -6,7 +6,7 @@
 
 **Architecture:** `src/core/` is introduced with pure, testable modules (event thread, profiles, payload assembly, VAD). `gemini.js` is reduced to a provider adapter. Capture stays in the renderer; reasoning only happens when the user presses the shortcut (reactive design).
 
-**Tech Stack:** Electron 30 (Node 20), CommonJS, Lit vendored in `src/assets/`, `whisper.cpp` via `whisper-server`, `@google/genai`. Tests with `node:test` (built in, zero dependencies).
+**Tech Stack:** Electron 44 (Node 24), CommonJS, Lit vendored in `src/assets/`, `whisper.cpp` via `whisper-server`, `@google/genai`. Tests with `node:test` (built in, zero dependencies).
 
 **Spec:** [`documentation/02-design.md`](02-design.md) · decisions in [`documentation/03-decisions.md`](03-decisions.md) · findings in [`documentation/01-current-state.md`](01-current-state.md)
 
@@ -16,14 +16,21 @@
 > which step each commit satisfied. For what actually shipped, what was measured, and
 > the bugs that only appeared once the app was run, see
 > [08-shipped.md](08-shipped.md). Open work is in [07-backlog.md](07-backlog.md).
+> Commands embedded in tasks 1–15 are historical too; use `bun run test` and
+> `bun run start` for any work performed now. Tasks 16–19 are current.
 
 > ✅ **Audit amendments applied** (2026-08-26): tasks 7, 8, 10 and 12 extended; new 7b, 14 and 15. See [06-audit.md](06-audit.md).
+>
+> **Next planned work — D30/D31:** tasks 16–19 below implement the honest profile
+> editor and retire the decorative preference UI. They are deliberately separate
+> from the shipped work above and are the current implementation queue.
 
 ## Global Constraints
 
-- **CommonJS is mandatory.** Everything in `src/core/**` and `src/utils/**` uses `require`/`module.exports`. The main process is Node 20 and **cannot** `require()` ESM.
+- **CommonJS is mandatory.** Everything in `src/core/**` and `src/utils/**` uses `require`/`module.exports`. The main process is Node 24; ESM support is not a reason to change this architecture.
 - **No new runtime dependencies.** Do not add packages to `dependencies`. Tests use the built-in `node:test`.
 - **Prettier style** (`.prettierrc`): 4 spaces, `printWidth` 150, single quotes, semicolons, `trailingComma: es5`, `arrowParens: avoid`. Run `npx prettier --write .` before every commit.
+- **Commands use Bun.** Run `bun run test`, not `bun test`; it executes `node --test`, matching Electron's Node runtime.
 - **No build step.** Do not introduce webpack/vite/rollup/esbuild/TypeScript.
 - **Audio format:** both channels arrive as **mono PCM16 at 24 kHz**, in **0.1 s** chunks (`AUDIO_CHUNK_DURATION = 0.1`, `SAMPLE_RATE = 24000` in `renderer.js:10-11`). Whisper consumes **16 kHz**.
 - **Speaker labels:** exactly `'them'` (system audio) and `'me'` (microphone). Never infer by diarisation (D6).
@@ -2947,14 +2954,291 @@ git commit -m "docs: AGENTS.md points at documentation/ and drops the TS/React m
 
 ---
 
+## Phase D — Honest profile authoring (D30/D31)
+
+**Order matters.** Build the pure file boundary first, then the migration and main
+process coordination, then the renderer. Do not expose a write IPC until its target
+has containment checks and regression tests. Do not remove a `customPrompt` writer
+until its replacement writes to a real profile file.
+
+### Task 16: Safe, revisioned profile file API
+
+**Files:**
+
+- Modify: `src/core/profiles.js`
+- Modify: `src/core/atomic-file.js`
+- Modify: `src/core/digest.js`
+- Modify: `test/profiles.test.js`
+- Modify: `test/atomic-file.test.js`
+- Modify: `test/digest.test.js`
+
+**Interfaces:**
+
+- `readProfileForEditing(profilesDir, slug)` → `{ profile, revisions }`, where
+  `profile` includes `slug`, editable `meta`, `instructions`, `checklist`, and note
+  `{ name, content, bytes }` values; `revisions` contains an opaque SHA-256 digest
+  for each physical file.
+- `writeProfile({ profilesDir, slug, profile, expectedRevision })` and
+  `writeChecklist({ profilesDir, slug, items, expectedRevision })` → new revision.
+  The complete document is passed and replaced atomically; a mismatched revision
+  throws a typed `ProfileConflictError`.
+- `writeNote({ profilesDir, slug, noteName, content, expectedRevision })`,
+  `deleteNote({ profilesDir, slug, noteName, expectedRevision })` → new state.
+- `createProfile({ profilesDir, displayName })` → `{ slug, profile }` and
+  `deleteProfile({ profilesDir, slug })`.
+- `appendDigest(...)` requires an existing, non-symlink profile directory and writes
+  `history.md` atomically. It never calls `mkdir` for a profile.
+
+- [ ] **Step 1: Write the failing core tests**
+
+Cover these behaviours before implementation:
+
+1. Editing name, model, confidential flag and instructions through one
+   `writeProfile` preserves all four values and unknown frontmatter keys/comments.
+2. A stale revision rejects the write without changing the file; the caller can read
+   the replacement and retain its unsaved draft.
+3. Notes reject `../x`, path separators, non-`.md` names, empty slugs and collisions;
+   a valid note stays under `profiles/<slug>/context/`.
+4. Checklist rejects empty entries and duplicate `slugify(text)` ids.
+5. A profile name that slugifies to empty is rejected. A collision is detected using
+   the real filesystem, including a differently cased existing directory on macOS.
+6. `createProfile` leaves either no directory or a complete readable profile after an
+   injected failure; never an incomplete directory that reserves the slug.
+7. `deleteProfile` refuses the last profile and rejects a symlinked target.
+8. `appendDigest` preserves an existing `history.md`, is atomic, and fails rather
+   than recreating a deleted/missing profile. Replace the old test that expects it to
+   create `profiles/<slug>/context`.
+
+- [ ] **Step 2: Implement path, revision and serializer primitives**
+
+Use `path.resolve` plus a separator-aware prefix check against the canonical
+`profilesDir`; accept only validated slugs/note names, and use `lstatSync` to reject
+symlinks at write/delete targets. Keep all of this in `core/profiles.js`, not in
+renderer validation.
+
+Calculate revisions from the exact UTF-8 bytes read from disk. Keep the current
+minimal frontmatter parser for loading, but add a lossless frontmatter representation
+for editing so unknown keys, comments and ordering survive a `profile.md` save.
+Known fields are updated in that representation; malformed managed values return a
+clear English validation error instead of being normalised away.
+
+Make `writeFileAtomic` use a unique sibling temporary name rather than only the
+process id. This supports future overlapping writes without one failed cleanup
+removing another write's temporary file.
+
+- [ ] **Step 3: Implement atomic profile creation and digest hardening**
+
+Create the folder and its three initial files in a unique sibling staging directory,
+then rename the completed directory to `profiles/<slug>`. Clean up only that explicit
+staging path on failure. Seed `profile.md` with `BASE_INSTRUCTIONS`, an empty
+`context/`, and a parseable empty `checklist.md`.
+
+Change `appendDigest` to confirm `profile.md` exists before reading `history.md`,
+read the current history at append time, and replace it with `writeFileAtomic`. Its
+header and generated prose remain English.
+
+- [ ] **Step 4: Run and commit the core boundary**
+
+Run: `bun run test`
+
+Expected: all profile, atomic-file and digest tests pass; the missing-profile digest
+test proves an old asynchronous result cannot recreate a deleted profile.
+
+Commit: `feat: add safe revisioned profile file writes`
+
+### Task 17: One-time legacy migration and digest-safe deletion
+
+**Files:**
+
+- Modify: `src/core/profiles-bootstrap.js`
+- Modify: `src/storage.js`
+- Modify: `src/utils/gemini.js`
+- Modify: `src/core/digest-queue.js`
+- Modify: `src/index.js`
+- Modify: `test/profiles-bootstrap.test.js`
+- Modify: `test/storage-session.test.js`
+- Modify: `test/digest-queue.test.js`
+
+**Interfaces:**
+
+- `migrateLegacyCustomPrompt({ configDir, legacyCustomPrompt, selectedProfile,
+migrationState })` → `{ migrated, profile, migrationState }`.
+- `storage` persists `customPromptMigrationVersion` only after the legacy note is
+  atomically present, and persists `digestCancelled` in session metadata.
+- `cancelDigestsForProfile(profileSlug)` marks matching pending work
+  `{ digestPending: false, digestCancelled: true }` before deletion.
+
+- [ ] **Step 1: Write failing migration tests**
+
+Test a fresh install, an install whose profile folders already exist, an empty legacy
+prompt, an interrupted write, and a second launch. The selected profile must receive
+the legacy note once; a missing selected slug falls back through `resolveProfileName`.
+An existing unrelated `migrated.md` must not be overwritten: preserve it and choose a
+non-colliding legacy note name. Completion is not recorded on failure and makes a
+second launch retry safely.
+
+- [ ] **Step 2: Replace bootstrap-coupled migration**
+
+`bootstrapProfiles` continues to create missing defaults only. Move legacy copying to
+the explicit idempotent migration called after profile resolution in startup. Do not
+clear `prefs.customPrompt`; D31 keeps it as a read-only compatibility value. Update
+the existing bootstrap test, whose current setup only happens to observe the
+`interview` copy while the implementation writes into every newly-created default.
+
+- [ ] **Step 3: Make deletion cancel digests, not wait forever**
+
+Before `deleteProfile` runs, atomically mark every stored session for that slug
+cancelled. `generateSessionDigest` checks this mark and the existence of `profile.md`
+after the provider response but before `appendDigest` or saving a digest. Pending
+digest recovery (`selectPendingDigests` / drain on startup) skips cancelled records.
+
+Regression tests must cover an in-flight response that returns after cancellation and
+a restarted app: neither may recreate the folder or retry the digest. The stored
+session and its event log remain untouched.
+
+- [ ] **Step 4: Add the main-process profile IPC**
+
+Add narrow handlers in `setupStorageIpcHandlers` for list/read/write profile,
+note/checklist mutations, create and delete. Every handler returns
+`{ success, data? , error?, code? }`; conflict and validation have stable `code`
+values so the renderer does not parse English messages. Never expose a config path or
+an arbitrary filesystem path to the renderer.
+
+The delete handler performs cancellation then deletion. It must reject any mutation
+when `sessionManager` has a live context, even if a renderer invokes IPC directly.
+Expose a minimal `isSessionActive()` query from the session boundary rather than
+reaching into its closure. Re-check this invariant in the handler immediately before
+the mutation.
+
+- [ ] **Step 5: Run and commit integration logic**
+
+Run: `bun run test`
+
+Expected: migration is exactly-once, cancellation survives restart, and all legacy
+session metadata remains readable.
+
+Commit: `feat: migrate legacy context and guard profile deletion`
+
+### Task 18: Replace the decorative UI with the profile editor
+
+**Files:**
+
+- Replace: `src/components/views/AICustomizeView.js` with the D30 editor
+- Modify: `src/components/app/CheatingDaddyApp.js`
+- Modify: `src/components/views/CustomizeView.js`
+- Modify: `src/components/views/OnboardingView.js`
+- Modify: `src/components/views/HistoryView.js`
+- Modify: the renderer-side `cheatingDaddy` bridge that exposes storage IPC
+
+**Interfaces:**
+
+- The editor receives `{ selectedProfile, availableProfiles, sessionActive }` and
+  callbacks to select the next-session profile and refresh the list after mutations.
+- Each loaded region retains its server revision and reports `Saving…`, `Saved HH:MM`,
+  `Save failed`, or `Changed outside the app — reload or copy your draft`.
+
+- [ ] **Step 1: Build the read-only master-detail shell**
+
+Render the profile list, active-profile indicator, immutable slug, name/model/
+confidential controls, instructions, one selected note, checklist, create and inline
+delete confirmation. Use the approved D30 copy in English. The selected editor
+profile and the profile active for the next session must be visibly distinct when
+they differ.
+
+While `sessionActive`, disable _every_ mutation control and show `Session running —
+end it to edit this profile.` Do not rely only on this UI lock; task 17 owns the
+authoritative main-process lock.
+
+- [ ] **Step 2: Implement ordered autosave and conflict recovery**
+
+Debounce each region by about 700 ms; flush on blur, profile switch and view exit.
+For `profile.md`, merge local field changes into one document model and serialize all
+writes through one promise queue. Notes and checklist have independent queues. A late
+response for an obsolete edit must not replace the latest revision/status.
+
+On a `PROFILE_CONFLICT`, stop that region's queue, preserve the unsaved draft in
+memory, fetch the current disk version, and offer Reload and Copy draft. Never retry
+automatically. A normal reload updates its revision and restarts autosave only after
+the user edits again.
+
+- [ ] **Step 3: Wire creation, deletion and onboarding**
+
+Create asks only for a display name, lets the main process derive the slug, refreshes
+the list, selects the new profile, and makes it the next-session profile only if the
+user chooses it. Delete confirms inline; after success it refreshes the list and
+switches `selectedProfile` to the first survivor if needed.
+
+Replace onboarding's `customPrompt` write with an atomic write to a non-colliding
+`context/onboarding.md` in the resolved selected profile. If onboarding text is
+empty, do not create the file. If it conflicts, keep onboarding open and show the
+error rather than marking onboarding complete.
+
+Remove both `customPrompt` textareas: this editor replaces `AICustomizeView`; the
+Settings view retains only real settings/keybinds. Its Restore defaults action must
+not write `customPrompt`.
+
+- [ ] **Step 4: Fix historical profile presentation without rewriting history**
+
+`HistoryView` obtains current display names from `describeProfiles()` and falls back
+to the stored raw slug for deleted profiles. Do not reassign, edit, or rewrite a
+stored session's profile. Preserve old `session.json.customPrompt` display for legacy
+sessions; D31 retires a preference, not historical metadata.
+
+- [ ] **Step 5: Manual verification and commit**
+
+Run `bun run start` and verify: create profile; edit every `profile.md` field quickly;
+edit a note in an external editor before autosave; resolve the conflict without
+losing the draft; attempt edits during a session; delete a profile after ending a
+session with a deliberately delayed digest; restart; inspect the profile folder and
+history.
+
+Commit: `feat: replace custom prompt UI with profile editor`
+
+### Task 19: Regression pass and removal audit for D31
+
+**Files:**
+
+- Modify: tests touched by tasks 16–18
+- Modify: `documentation/08-shipped.md` after manual verification
+
+- [ ] **Step 1: Audit every `customPrompt` occurrence**
+
+Use `rg -n "customPrompt" src test` and classify each result as one of: legacy
+preference migration, historical session metadata, Live compatibility parameter, or
+a prohibited UI/preference writer. Remove only the last class. In particular, ensure
+there is no `storage.updatePreference('customPrompt', ...)` and no default-reset
+assignment to it.
+
+- [ ] **Step 2: Run the full verification matrix**
+
+Run `bun run test`, `npx prettier --check .`, and `bun run start`. Exercise a fresh
+profile, an upgraded profile with legacy text, a deleted profile's stored session,
+and a confidential profile. Confirm all user-visible errors and logs are English.
+
+- [ ] **Step 3: Record results and commit**
+
+Document observed behaviour, migration outcomes and any deferred edge case in
+`08-shipped.md` or `07-backlog.md`; do not mark a speculative manual scenario as
+verified. Commit: `test: cover profile editor regressions`
+
 ## Final verification
 
-- [ ] `npm test` — every test passes
+- [ ] `bun run test` — every test passes
 - [ ] `npx prettier --check .` — no differences
-- [ ] `npm start` starts with no console errors
+- [ ] `bun run start` starts with no console errors
 - [ ] A full session: chosen profile → labelled dual transcription → shortcut → answer with the context of notes + conversation + screen
 - [ ] `HistoryView` shows the session thread, and a migrated legacy session too
 - [ ] The window still does not appear when sharing the screen in Google Meet (H1 not broken)
 - [ ] With default preferences `whisper-server` starts and `llama-server` does **not** (D14)
 - [ ] A typed question gets an answer with notes and transcript (D15)
 - [ ] Closing a session produces a new entry in `context/history.md` (D17)
+- [ ] Legacy `customPrompt` migrates once into the resolved selected profile and is
+      never silently cleared (D31)
+- [ ] A stale editor revision cannot overwrite a hand edit; its draft remains
+      recoverable (D30)
+- [ ] No profile, note, creation or deletion IPC can escape `profiles/`, including
+      through a symlink (D30)
+- [ ] Creating a profile leaves a complete folder or none; deleting one cannot be
+      reversed by a late digest response (D30)
+- [ ] The profile editor is read-only during a live session in both renderer and main
+      process, and stored sessions retain their original raw profile slug (D30)

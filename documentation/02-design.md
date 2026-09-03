@@ -55,9 +55,10 @@ messages: accumulated transcript (labelled speech events)
 
 ## Section 2 — Profiles as folders
 
-A profile **is a folder on disk**. The app only reads; you write in your editor,
-not in a textarea. They live alongside the rest of the config (`getConfigDir()`
-in `storage.js`):
+A profile **is a folder on disk**. That is the source of truth: the app reads it at
+session start, and since D30 it can also write it from the profile editor, without
+ever becoming the only way in — the same files stay editable by hand. They live
+alongside the rest of the config (`getConfigDir()` in `storage.js`):
 
 ```
 ~/Library/Application Support/cheating-daddy-config/profiles/
@@ -103,9 +104,120 @@ that can drift out of sync.
 
 ### Migration
 
-On first launch the app generates `profiles/` from the six current profiles and
-writes the existing `customPrompt` into the `context/` folder of the selected
-profile. No configuration is lost.
+The bootstrap creates the default profile folders only when they do not exist. A
+separate, one-time legacy migration copies a non-empty `customPrompt` into
+`context/migrated.md` of the selected profile (or the resolved fallback). It records
+completion only after the atomic write succeeds. This also covers an installation
+that already has profile folders but still holds text from the old decorative editor;
+otherwise retiring that editor would silently discard the only copy the person sees.
+No configuration is lost, and the legacy preference remains untouched for a later
+version to retire safely (D31).
+
+### Editing profiles in the app (D30)
+
+One screen, master-detail: the list of profiles on the left, the selected profile's
+editor on the right. What is being edited and which profile is active for the next
+session are both visible at all times, which is what the screen it replaces got
+wrong.
+
+```
+Profiles                    Job Interview
+────────────────   ──────────────────────────────
+> Job Interview ●   Name  [Job Interview           ]
+  Work Meeting      Model [gemini-2.5-flash        ]
+  Client Call       [ ] Confidential — never leaves
+                        this machine
+  + New profile
+                    Instructions       ✓ Saved 12:04
+                    ┌──────────────────────────┐
+                    │ You are my memory        │
+                    │ assistant, not a         │
+                    │ teleprompter...          │
+                    └──────────────────────────┘
+
+                    Notes (context/)   ✓ Saved 12:04
+                    ▸ history.md              5.8 KB
+                    ▸ migrated.md               61 B
+                      + Add note
+
+                    Checklist          ✓ Saved 12:04
+                    • Ask about the team
+                    • Ask about deployment
+                      + Add item
+
+                                     Delete profile
+```
+
+`●` marks the profile that the next session will use. There is no rename button:
+the display name is the `Name` field, and the folder slug never changes (D30).
+
+**Saving.** Autosave per region, roughly 700 ms after the last keystroke, flushed on
+blur and on leaving the profile or the view so nothing is lost in flight. Each region
+shows its own state. Every write is atomic (`core/atomic-file.js`). `profile.md` is
+one physical document, however: its name, model, confidential flag and instructions
+share one serialized save queue, so a late debounce for one control cannot restore
+an older value of another. A note and `checklist.md` each have their own queue.
+
+The disk remains authoritative even when a person also edits it by hand. Each read
+returns a revision fingerprint and each write supplies the revision it edited. A
+changed file is not overwritten silently: the region shows `Changed outside the app
+— reload or copy your draft`, and no save is attempted until the conflict is
+resolved. Atomic replacement protects against torn files; the revision check protects
+against a complete but stale autosave overwriting an external edit.
+
+**While a session runs** every control is disabled and a banner says
+`Session running — end it to edit this profile.` The reasoning is in D30.
+
+**Notes.** `context/*.md`, listed with their size, one open at a time. The `.md`
+extension is enforced by the UI rather than accepted and ignored: `readContextFiles`
+reads nothing else, so a note saved as `.txt` today is silently never sent. Note
+names are slugified and any name escaping `context/` is rejected — the same
+treatment `resolveScreenshotPath` already gives a path read from disk. An empty or
+colliding slug is rejected rather than overwriting an existing note. `history.md` is
+shown as an app-managed note: it remains editable as a file, but the editor explains
+that the next post-session digest appends to it.
+
+Checklist items must be non-empty and have distinct slug-derived ids. Otherwise two
+items can map to the same `checklist` event and make the next session's state
+ambiguous.
+
+**Creating** asks for a name, derives the slug through the existing `slugify`,
+rejects an empty or colliding slug (using the filesystem's case rules), and seeds
+`profile.md` with `BASE_INSTRUCTIONS` so a new profile is usable rather than blank.
+It builds the complete folder in a sibling temporary directory and renames that
+directory into place, so a crash cannot leave a half-created profile occupying a
+name.
+
+**Deleting** confirms inline, refuses to remove the last remaining profile, and moves
+`selectedProfile` to the first survivor when the active one goes. Stored sessions
+keep the slug they recorded and render it raw; history is not rewritten.
+The main process, not merely the disabled UI, enforces the no-live-session rule. It
+marks any detached digest for that profile as cancelled before deleting it; otherwise
+`appendDigest` can recreate the deleted folder after its provider call returns. An
+in-flight provider call may still finish, but it checks that cancellation and that
+the target profile still exists before writing. `session.json` records
+`digestCancelled: true` so D24 does not retry it at startup. The session remains
+intact, simply without that optional profile digest.
+
+**Where the code goes.** `core/profiles.js` gains the write half — `writeProfile`,
+`writeNote`, `deleteNote`, `writeChecklist`, `createProfile`, `deleteProfile` — so
+that the frontmatter serializer sits beside `parseFrontmatter` and cannot drift from
+it. The serializer preserves unknown frontmatter keys and rejects malformed values
+instead of silently erasing hand-authored metadata. It stays pure and tested. The IPC
+handlers accept profile slugs and note names, never arbitrary paths, validate that
+their resolved targets remain below `profiles/`, and join `list-profiles` in
+`setupStorageIpcHandlers` (`index.js`), and the renderer reaches them through the
+`cheatingDaddy` object.
+
+`appendDigest` is also a profile writer: it must use the same atomic replacement and
+must require an existing profile directory rather than creating one with `mkdir`.
+It reads `history.md` at append time, so a completed editor save is retained rather
+than overwritten by a summary that started earlier.
+
+The history stops resolving profile names through a hardcoded map
+(`HistoryView.js:487`, which lists profiles that do not exist and misses every one a
+person creates) and reads them from `describeProfiles()`, the same source as the
+picker.
 
 ## Section 3 — Capture
 

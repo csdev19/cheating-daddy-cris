@@ -64,6 +64,59 @@ does it yet, and doing it in bulk on startup would be the same mistake the expli
 before the language sweep still opens with a Spanish heading. Only affects files
 that already exist.
 
+### A stored session cannot be named or described
+
+Every row in the history reads `profile label · date · time`
+(`HistoryView.js:763`). Nothing in it comes from what the session was about, so
+someone who always picks the same profile gets a column of identical rows
+separated only by a timestamp. The summary is the only thing that distinguishes
+them, and it is inside the detail view, arrives after the session closes (D24),
+and is missing entirely from sessions that never got one.
+
+The metadata has nowhere to put it: `saveSession` (`storage.js:473`) writes a
+fixed record — `sessionId`, `createdAt`, `lastUpdated`, `profile`,
+`customPrompt`, `digest`, `digestPending`, `digestAttempts` — and
+`getAllSessions` projects a fixed shape on top of it. Neither has a title or a
+description.
+
+Adding them is cheap. `saveSession` already merges into the stored record and
+writes atomically (D26), so an edit is a merge of two fields and never touches
+the event log, which stays append-only. An empty title falls back to today's
+label, so stored sessions do not regress.
+
+Two things are unresolved and are the reason this is written down rather than
+built:
+
+**Whether the title should be suggested.** The obvious source is the first line
+of the digest, but the digest lands after the session ends and can be generated
+much later, so a row the person already named would change under them. A
+suggestion offered once at close, never overwriting an edit, is probably the
+shape — that needs deciding, not guessing.
+
+**Whether the profile is editable at all.** It is not a label: it selected the
+instructions, the notes and the checklist that produced every answer in that
+thread. Re-pointing a stored session at a different profile would make the
+record claim something that did not happen, which is the opposite of what the
+event log exists for. Showing the profile better is a different job from
+changing it, and only the first one is clearly wanted.
+
+That first job has a bug sitting in it already. `_getProfileLabel` resolves the
+stored profile through a hardcoded map (`HistoryView.js:487`) listing `sales`,
+`presentation`, `negotiation` and `exam` — none of which exist on disk — while
+any profile the person actually creates is absent and renders as its folder
+slug. AGENTS.md is explicit that the profile list is read from the profiles
+folder and never hardcoded. Reading the name from the profile's frontmatter
+fixes the label independently of anything else here, and is worth doing first.
+
+### Profile editor: local file conflicts and managed digest notes
+
+D30 specifies optimistic concurrency for editor writes and makes `history.md` an
+app-managed note. The implementation plan must cover the UX details: retaining an
+unsaved draft after a revision conflict, reloading without closing the editor, and
+making it clear that a later digest can append to `history.md`. These are not a
+second sync system or undo/versioning; they are the minimum needed for folders to
+remain genuinely editable by hand.
+
 ---
 
 ## Open
