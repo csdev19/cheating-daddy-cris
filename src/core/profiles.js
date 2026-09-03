@@ -453,7 +453,10 @@ function createProfile({ profilesDir, displayName }) {
     return { slug, profile: readProfileForEditing(profilesDir, slug).profile };
 }
 
-function deleteProfile({ profilesDir, slug }) {
+// Split out so a caller can prove a delete will be allowed *before* it takes an
+// irreversible step on the strength of it — cancelling the summaries owed to this
+// profile, for one.
+function assertDeletable({ profilesDir, slug }) {
     const dir = profileDirOf(profilesDir, slug);
 
     let stats;
@@ -470,6 +473,12 @@ function deleteProfile({ profilesDir, slug }) {
     if (available.includes(slug) && available.length === 1) {
         throw new ProfileError('LAST_PROFILE', 'This is the only profile left; the app cannot start a session without one.');
     }
+
+    return dir;
+}
+
+function deleteProfile({ profilesDir, slug }) {
+    const dir = assertDeletable({ profilesDir, slug });
 
     fs.rmSync(dir, { recursive: true, force: true });
     return { deleted: slug };
@@ -492,5 +501,6 @@ module.exports = {
     writeNote,
     deleteNote,
     createProfile,
+    assertDeletable,
     deleteProfile,
 };

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { selectPendingDigests, MAX_DIGEST_ATTEMPTS } = require('../src/core/digest-queue');
+const { selectPendingDigests, selectDigestsToCancel, MAX_DIGEST_ATTEMPTS } = require('../src/core/digest-queue');
 
 const pending = (over = {}) => ({ sessionId: 's1', digestPending: true, digestAttempts: 0, createdAt: 100, ...over });
 
@@ -45,4 +45,30 @@ test('tolerates a missing or malformed list', () => {
 
 test('a missing attempt count counts as none', () => {
     assert.strictEqual(selectPendingDigests([{ sessionId: 's1', digestPending: true }]).length, 1);
+});
+
+// Deleting a profile cancels the summaries that would have been written into it
+// (D30). Without this, a queue drained on the next launch recreates the folder.
+test('a cancelled session is never picked up again', () => {
+    assert.deepStrictEqual(selectPendingDigests([pending({ digestCancelled: true })]), []);
+});
+
+test('cancelling selects only the unfinished work of that profile', () => {
+    const sessions = [
+        { sessionId: 'a', profile: 'interview', digestPending: true, digestAttempts: 0, createdAt: 1 },
+        { sessionId: 'b', profile: 'meeting', digestPending: true, digestAttempts: 0, createdAt: 2 },
+        { sessionId: 'c', profile: 'interview', digest: 'already summarised', createdAt: 3 },
+        { sessionId: 'd', profileName: 'interview', digestPending: true, createdAt: 4 },
+        { sessionId: 'e', profile: 'interview', digestPending: true, digestCancelled: true, createdAt: 5 },
+    ];
+
+    assert.deepStrictEqual(selectDigestsToCancel(sessions, 'interview'), ['a', 'd']);
+    assert.deepStrictEqual(selectDigestsToCancel(sessions, 'meeting'), ['b']);
+    assert.deepStrictEqual(selectDigestsToCancel(sessions, 'gone'), []);
+});
+
+test('cancelling tolerates a missing profile slug rather than matching everything', () => {
+    const sessions = [{ sessionId: 'a', profile: null, digestPending: true, createdAt: 1 }];
+    assert.deepStrictEqual(selectDigestsToCancel(sessions, null), []);
+    assert.deepStrictEqual(selectDigestsToCancel(sessions, ''), []);
 });

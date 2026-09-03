@@ -6,6 +6,7 @@ const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const { createWindow, updateGlobalShortcuts } = require('./utils/window');
 const { setupGeminiIpcHandlers, stopMacOSAudioCapture, sendToRenderer } = require('./utils/gemini');
 const storage = require('./storage');
+const profiles = require('./core/profiles');
 
 const geminiSessionRef = { current: null };
 let mainWindow = null;
@@ -20,22 +21,39 @@ app.whenReady().then(async () => {
     storage.initializeStorage();
 
     // Profiles live on disk as markdown folders (D7). On first launch they are
-    // generated from the templates, keeping the old customPrompt as context.
+    // generated from the templates. Carrying the old customPrompt across is a
+    // separate, idempotent step (D31).
     try {
-        const { bootstrapProfiles } = require('./core/profiles-bootstrap');
-        const { getProfilesDir, resolveProfileName } = require('./core/profiles');
+        const { bootstrapProfiles, migrateLegacyCustomPrompt } = require('./core/profiles-bootstrap');
         const prefs = storage.getPreferences();
-        const created = bootstrapProfiles({ configDir: storage.getConfigDir(), legacyCustomPrompt: prefs.customPrompt });
+        const created = bootstrapProfiles({ configDir: storage.getConfigDir() });
         if (created.length > 0) {
             console.log('Created profiles:', created.join(', '));
         }
 
         // The stored profile may name a folder that no longer exists (renamed or
         // deleted by hand). Repairing it here means the app can always start.
-        const resolved = resolveProfileName(getProfilesDir(storage.getConfigDir()), prefs.selectedProfile);
+        const resolved = profiles.resolveProfileName(profiles.getProfilesDir(storage.getConfigDir()), prefs.selectedProfile);
         if (resolved && resolved !== prefs.selectedProfile) {
             console.log(`Profile '${prefs.selectedProfile}' is missing; falling back to '${resolved}'`);
             storage.updatePreference('selectedProfile', resolved);
+        }
+
+        // D31: the legacy `customPrompt` becomes a real note exactly once. Its own
+        // marker drives it, not "the profiles folder was just created" — someone
+        // whose profiles appeared in an earlier release may still owe this. The
+        // marker is recorded only after the note is safely on disk.
+        const migration = migrateLegacyCustomPrompt({
+            configDir: storage.getConfigDir(),
+            legacyCustomPrompt: prefs.customPrompt,
+            selectedProfile: resolved || prefs.selectedProfile,
+            migrationState: prefs.customPromptMigrationVersion,
+        });
+        if (migration.migrationState !== (prefs.customPromptMigrationVersion || 0)) {
+            storage.updatePreference('customPromptMigrationVersion', migration.migrationState);
+        }
+        if (migration.migrated) {
+            console.log(`Moved the legacy custom prompt into ${migration.profile}/context/${migration.note}`);
         }
     } catch (error) {
         console.error('Could not prepare the default profiles:', error);
@@ -82,6 +100,28 @@ app.on('activate', () => {
         createMainWindow();
     }
 });
+
+function profilesDir() {
+    return profiles.getProfilesDir(storage.getConfigDir());
+}
+
+// ProfileError already carries the code the renderer branches on; anything else
+// (an fs errno, say) keeps its own rather than being flattened to one label.
+function runProfileOperation(run) {
+    try {
+        return { success: true, data: run() };
+    } catch (error) {
+        console.error('Profile operation failed:', error.message);
+        return { success: false, code: error.code || 'PROFILE_OPERATION_FAILED', error: error.message };
+    }
+}
+
+function mutateProfile(run) {
+    if (require('./utils/gemini').isSessionActive()) {
+        return { success: false, code: 'SESSION_ACTIVE', error: 'End the session before editing a profile.' };
+    }
+    return runProfileOperation(run);
+}
 
 function setupStorageIpcHandlers() {
     // ============ CONFIG ============
@@ -177,11 +217,60 @@ function setupStorageIpcHandlers() {
     // actually exists, and picking a missing profile breaks the session.
     ipcMain.handle('list-profiles', async () => {
         try {
-            const { getProfilesDir, describeProfiles } = require('./core/profiles');
-            return { success: true, data: describeProfiles(getProfilesDir(storage.getConfigDir())) };
+            return { success: true, data: profiles.describeProfiles(profilesDir()) };
         } catch (error) {
             console.error('Error listing profiles:', error);
             return { success: false, error: error.message, data: [] };
+        }
+    });
+
+    // ============ PROFILE EDITOR (D30) ============
+    // The renderer sends ids, never paths, and every mutation asks the session
+    // boundary again right before it runs: a disabled control in the renderer is
+    // not an authority boundary. Failures carry a stable `code` so the view never
+    // has to match on English prose.
+    ipcMain.handle('profiles:read', async (event, { slug }) => runProfileOperation(() => profiles.readProfileForEditing(profilesDir(), slug)));
+
+    ipcMain.handle('profiles:write', async (event, { slug, profile, expectedRevision }) =>
+        mutateProfile(() => profiles.writeProfile({ profilesDir: profilesDir(), slug, profile, expectedRevision }))
+    );
+
+    ipcMain.handle('profiles:write-checklist', async (event, { slug, items, expectedRevision }) =>
+        mutateProfile(() => profiles.writeChecklist({ profilesDir: profilesDir(), slug, items, expectedRevision }))
+    );
+
+    ipcMain.handle('profiles:write-note', async (event, { slug, noteName, content, expectedRevision }) =>
+        mutateProfile(() => profiles.writeNote({ profilesDir: profilesDir(), slug, noteName, content, expectedRevision }))
+    );
+
+    ipcMain.handle('profiles:delete-note', async (event, { slug, noteName, expectedRevision }) =>
+        mutateProfile(() => profiles.deleteNote({ profilesDir: profilesDir(), slug, noteName, expectedRevision }))
+    );
+
+    ipcMain.handle('profiles:create', async (event, { displayName }) =>
+        mutateProfile(() => profiles.createProfile({ profilesDir: profilesDir(), displayName }))
+    );
+
+    ipcMain.handle('profiles:delete', async (event, { slug }) =>
+        mutateProfile(() => {
+            // Proven deletable first, then the summaries owed to it are called off,
+            // then the folder goes. Cancelling before a delete that would have been
+            // refused would call off work for a profile that still exists; deleting
+            // before cancelling leaves the startup drain able to recreate it (D30).
+            profiles.assertDeletable({ profilesDir: profilesDir(), slug });
+            const cancelled = storage.cancelDigestsForProfile(slug);
+            return { ...profiles.deleteProfile({ profilesDir: profilesDir(), slug }), cancelledDigests: cancelled.length };
+        })
+    );
+
+    ipcMain.handle('profiles:session-active', async () => {
+        try {
+            return { success: true, data: require('./utils/gemini').isSessionActive() };
+        } catch (error) {
+            // Unknown means "assume a session is running": refusing an edit that
+            // would have been safe is recoverable, the other way round is not.
+            console.error('Could not read the session state:', error);
+            return { success: true, data: true };
         }
     });
 

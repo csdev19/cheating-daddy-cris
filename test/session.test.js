@@ -268,3 +268,13 @@ test('starting a new session forgets the previous audio', () => {
 
     assert.strictEqual(event.echo, false);
 });
+
+test('isActive reports whether a session is live, so the main process can refuse edits', () => {
+    const manager = createSessionManager({ configDir: makeConfigDir(), sendToProvider: async () => 'ok' });
+
+    assert.strictEqual(manager.isActive(), false);
+    manager.start({ profileName: 'interview', sessionId: 's-active' });
+    assert.strictEqual(manager.isActive(), true);
+    manager.end();
+    assert.strictEqual(manager.isActive(), false);
+});

@@ -25,7 +25,10 @@ const DEFAULT_CREDENTIALS = {
 };
 
 const DEFAULT_PREFERENCES = {
+    // Legacy and read-only (D31). Nothing writes it any more; it exists so an
+    // install that predates profiles still has its old prompt to migrate once.
     customPrompt: '',
+    customPromptMigrationVersion: 0,
     providerMode: 'byok',
     // D14: independent axes. providerMode is kept around to migrate old preferences.
     transcription: 'local-whisper',
@@ -490,6 +493,9 @@ function saveSession(sessionId, data) {
         // to a crash is unfinished work, and this is what makes it findable (D24).
         digestPending: data.digestPending ?? existingSession?.digestPending ?? false,
         digestAttempts: data.digestAttempts ?? existingSession?.digestAttempts ?? 0,
+        // Set when the profile this summary was owed to is deleted (D30). The
+        // session itself is untouched: only the unfinished work is called off.
+        digestCancelled: data.digestCancelled ?? existingSession?.digestCancelled ?? false,
     };
     return writeJsonFile(metaPath, sessionData);
 }
@@ -544,6 +550,7 @@ function getAllSessions() {
                     digest: session.digest || null,
                     digestPending: session.digestPending === true,
                     digestAttempts: session.digestAttempts || 0,
+                    digestCancelled: session.digestCancelled === true,
                 };
             })
             .filter(Boolean);
@@ -551,6 +558,19 @@ function getAllSessions() {
         console.error('Error reading sessions:', error.message);
         return [];
     }
+}
+
+// Called before a profile folder is removed. A summary already in flight may still
+// return from the provider, and the startup drain would otherwise pick the work up
+// again — either one would recreate the deleted folder (D30).
+function cancelDigestsForProfile(profileSlug) {
+    const { selectDigestsToCancel } = require('./core/digest-queue');
+
+    const cancelled = selectDigestsToCancel(getAllSessions(), profileSlug);
+    for (const sessionId of cancelled) {
+        saveSession(sessionId, { digestPending: false, digestCancelled: true });
+    }
+    return cancelled;
 }
 
 function deleteSession(sessionId) {
@@ -627,6 +647,7 @@ module.exports = {
 
     // History
     getHistoryDir,
+    cancelDigestsForProfile,
     getSessionDir,
     appendSessionEvent,
     readSessionEvents,

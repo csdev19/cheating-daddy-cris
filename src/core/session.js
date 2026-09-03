@@ -73,7 +73,14 @@ function createSessionManager({ configDir, sendToProvider, onEvent = null, now =
         pending = false;
     }
 
-    return { start, recordSpeech, recordScreen, ask, end, getContext: () => context, getProfile: () => profile };
+    // The profile editor is refused while a session is live (D30). The renderer
+    // disables itself, but a disabled control is not an authority boundary: the
+    // main process asks here before it lets any write through.
+    function isActive() {
+        return context !== null && profile !== null;
+    }
+
+    return { start, recordSpeech, recordScreen, ask, end, isActive, getContext: () => context, getProfile: () => profile };
 }
 
 module.exports = { createSessionManager };

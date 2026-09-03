@@ -234,6 +234,16 @@ async function generateSessionDigest(snapshot) {
 
         const digest = profile.meta.confidential ? await getLocalAi().sendLocalPayload(digestPayload) : await sendPayloadToGemini(digestPayload);
 
+        // The profile can be deleted while the provider is still answering. The
+        // work was cancelled along with it, and writing now would recreate the
+        // folder the person just removed (D30). appendDigest refuses too; this
+        // check is what makes it a quiet drop rather than a logged failure.
+        if (getSession(sessionId)?.digestCancelled === true) {
+            console.log(`Dropping the summary for ${sessionId}: its profile was deleted.`);
+            sendToRenderer('digest-finished', { success: false, error: 'The profile was deleted, so its summary was dropped.' });
+            return;
+        }
+
         if (digest) {
             appendDigest({
                 profilesDir: getProfilesDir(getConfigDir()),
@@ -258,6 +268,12 @@ async function digestStoredSession(sessionId) {
     const session = getSession(sessionId);
     const profileName = session?.profileName || session?.profile;
     if (!session || !profileName) return { success: false, error: 'Session not found' };
+
+    // Cancelled when its profile was deleted (D30). Retrying it — automatically on
+    // the next launch, or by hand from the history — would recreate that folder.
+    if (session.digestCancelled === true) {
+        return { success: false, error: 'The profile this session used was deleted, so its summary was dropped.' };
+    }
 
     // Reuses the thread's own formatting, so a summary made after the fact reads
     // exactly like one generated at the time — echoes excluded and all.
@@ -1702,6 +1718,7 @@ module.exports = {
     drainPendingDigests,
     endSessionForEmergency,
     sendPayloadToGemini,
+    isSessionActive: () => sessionManager.isActive(),
     initializeGeminiSession,
     getEnabledTools,
     getStoredSetting,
