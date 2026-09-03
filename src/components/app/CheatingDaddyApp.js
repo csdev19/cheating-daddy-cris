@@ -847,6 +847,8 @@ export class CheatingDaddyApp extends LitElement {
             this.sessionActive = false;
             this._stopTimer();
             this.currentView = 'main';
+            // A profile may have been added or deleted while the session ran.
+            this.loadProfiles();
         } else {
             if (window.require) {
                 const { ipcRenderer } = window.require('electron');
@@ -895,7 +897,9 @@ export class CheatingDaddyApp extends LitElement {
 
         cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
         this.threadEvents = [];
-        this.availableProfiles = [];
+        // `availableProfiles` is deliberately not reset here. It is the catalogue on
+        // disk, not session state: clearing it left the picker and the profile
+        // editor empty for the rest of the run, since nothing reloaded it.
         this.toast = null;
         this.digestSaving = false;
         this.pendingAsk = null;
@@ -1002,7 +1006,9 @@ export class CheatingDaddyApp extends LitElement {
                 return html`
                     <main-view
                         .selectedProfile=${this.selectedProfile}
+                        .availableProfiles=${this.availableProfiles}
                         .onProfileChange=${p => this.handleProfileChange(p)}
+                        .onOpenProfiles=${() => this.navigate('profiles')}
                         .onStart=${() => this.handleStart()}
                         .onExternalLink=${url => this.handleExternalLinkClick(url)}
                         .whisperDownloading=${this._whisperDownloading}

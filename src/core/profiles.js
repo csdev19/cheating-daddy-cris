@@ -72,12 +72,19 @@ function listProfiles(profilesDir) {
         .sort();
 }
 
-// What the picker needs: the folder (the real id) and the name to display. Coming
-// from disk, the list cannot drift out of sync with what actually exists.
+// What the picker needs: the folder (the real id), the name to display, and enough
+// to say what starting a session with it would send — the note count and whether it
+// is confidential (D13). Coming from disk, the list cannot drift out of sync with
+// what actually exists.
 function describeProfiles(profilesDir) {
     return listProfiles(profilesDir).map(dir => {
         const { meta } = parseFrontmatter(fs.readFileSync(path.join(profilesDir, dir, 'profile.md'), 'utf8'));
-        return { dir, name: meta.name || dir };
+        return {
+            dir,
+            name: meta.name || dir,
+            confidential: meta.confidential === true,
+            notes: readContextFiles(path.join(profilesDir, dir)).length,
+        };
     });
 }
 

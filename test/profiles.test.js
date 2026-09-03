@@ -64,7 +64,19 @@ test('listProfiles ignores folders without a profile.md', () => {
 test('describeProfiles gives the folder and the display name of each profile', () => {
     const root = makeSampleProfile();
 
-    assert.deepStrictEqual(describeProfiles(root), [{ dir: 'backend-interview', name: 'Backend Interview' }]);
+    assert.deepStrictEqual(describeProfiles(root), [{ dir: 'backend-interview', name: 'Backend Interview', confidential: false, notes: 2 }]);
+});
+
+// The start screen says what is about to be sent before a session begins (M3), so
+// the picker needs more than a label: how many notes go whole to the model, and
+// whether this profile is one that never leaves the machine (D13).
+test('describeProfiles reports the note count and the confidential flag', () => {
+    const root = makeSampleProfile();
+    fs.writeFileSync(path.join(root, 'backend-interview', 'profile.md'), '---\nname: Secret\nconfidential: true\n---\n\nBody.');
+    // Only .md is ever loaded, so only .md is counted.
+    fs.writeFileSync(path.join(root, 'backend-interview', 'context', 'ignored.txt'), 'not markdown');
+
+    assert.deepStrictEqual(describeProfiles(root), [{ dir: 'backend-interview', name: 'Secret', confidential: true, notes: 2 }]);
 });
 
 test('describeProfiles falls back to the folder name when the frontmatter has none', () => {
@@ -73,8 +85,8 @@ test('describeProfiles falls back to the folder name when the frontmatter has no
     fs.writeFileSync(path.join(root, 'unnamed', 'profile.md'), 'No frontmatter.');
 
     assert.deepStrictEqual(describeProfiles(root), [
-        { dir: 'backend-interview', name: 'Backend Interview' },
-        { dir: 'unnamed', name: 'unnamed' },
+        { dir: 'backend-interview', name: 'Backend Interview', confidential: false, notes: 2 },
+        { dir: 'unnamed', name: 'unnamed', confidential: false, notes: 0 },
     ]);
 });
 
@@ -392,7 +404,7 @@ test('createProfile derives the slug once and seeds a complete, loadable profile
     const loaded = loadProfile(root, slug);
     assert.strictEqual(loaded.meta.name, 'Técnical Review!', 'the display name keeps what was typed');
     assert.ok(loaded.instructions.length > 0, 'a new profile is seeded, not blank');
-    assert.deepStrictEqual(describeProfiles(root), [{ dir: slug, name: 'Técnical Review!' }]);
+    assert.deepStrictEqual(describeProfiles(root), [{ dir: slug, name: 'Técnical Review!', confidential: false, notes: 0 }]);
 });
 
 test('createProfile rejects a name with no slug and a name that collides', () => {

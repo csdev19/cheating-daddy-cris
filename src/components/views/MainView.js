@@ -687,7 +687,9 @@ export class MainView extends LitElement {
         onStart: { type: Function },
         onExternalLink: { type: Function },
         selectedProfile: { type: String },
+        availableProfiles: { type: Array },
         onProfileChange: { type: Function },
+        onOpenProfiles: { type: Function },
         isInitializing: { type: Boolean },
         whisperDownloading: { type: Boolean },
         downloadProgress: { type: Object },
@@ -719,7 +721,9 @@ export class MainView extends LitElement {
         this.onStart = () => {};
         this.onExternalLink = () => {};
         this.selectedProfile = 'interview';
+        this.availableProfiles = [];
         this.onProfileChange = () => {};
+        this.onOpenProfiles = () => {};
         this.isInitializing = false;
         this.whisperDownloading = false;
         this.downloadProgress = { active: false, label: '', percentage: null };
@@ -1026,6 +1030,40 @@ export class MainView extends LitElement {
 
     _handleProfileChange(e) {
         this.onProfileChange(e.target.value);
+    }
+
+    // The profile decides the instructions, the notes and the checklist the whole
+    // session runs on, so it belongs above the mode split rather than inside one of
+    // them: it applies to BYOK and local alike, and it is the first choice a session
+    // makes. Until now it was not on this screen at all, so a session silently used
+    // whatever was last stored in preferences.
+    _renderProfilePicker() {
+        const profiles = this.availableProfiles || [];
+        const current = profiles.find(profile => profile.dir === this.selectedProfile);
+
+        return html`
+            <div class="form-group">
+                <label class="form-label">Profile</label>
+                <select .value=${this.selectedProfile || ''} @change=${this._handleProfileChange}>
+                    ${profiles.map(
+                        profile => html`<option value=${profile.dir} ?selected=${profile.dir === this.selectedProfile}>${profile.name}</option>`
+                    )}
+                </select>
+                <div class="form-hint">
+                    ${current ? this._describeProfile(current) : 'No profiles yet.'}
+                    <span class="link" @click=${() => this.onOpenProfiles()}>Edit profiles</span>
+                </div>
+            </div>
+        `;
+    }
+
+    // Says what starting a session would send, before it is sent (M3). Every note
+    // goes whole (D8), so the count is the honest measure of the context.
+    _describeProfile(profile) {
+        const notes = profile.notes === 1 ? '1 note' : `${profile.notes || 0} notes`;
+        const sent = `${notes} sent whole with every question.`;
+
+        return profile.confidential ? `${sent} Confidential — nothing leaves this machine.` : sent;
     }
 
     _openLocalHelp() {
@@ -1394,6 +1432,8 @@ export class MainView extends LitElement {
                         : html` <div class="page-title">${html`Cheating Daddy <span class="mode-suffix">BYOK</span>`}</div> `
                 }
                 <div class="page-subtitle">${this._mode === 'byok' ? 'Bring your own API keys' : 'Run models locally on your machine'}</div>
+
+                ${this._renderProfilePicker()}
 
                 <!-- Cloud mode render branch intentionally disabled. -->
                 ${this._mode === 'byok' ? this._renderByokMode() : ''} ${this._mode === 'local' ? this._renderLocalMode() : ''}
