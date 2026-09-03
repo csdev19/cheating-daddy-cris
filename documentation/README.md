@@ -42,6 +42,7 @@ stops burning model calls on every turn.
 | [08-shipped.md](08-shipped.md)                                       | What shipped, what was measured, lessons from running it                                      |
 | [09-reimplementation-reference.md](09-reimplementation-reference.md) | Hand-over to the new repository: verified behaviour, target stack, licence and open decisions |
 | [10-execution-plan.md](10-execution-plan.md)                         | Coordinator for the new repository: milestones, phases, exit criteria and open decisions      |
+| [11-agent-migration-prompt.md](11-agent-migration-prompt.md)         | The brief to hand the coding agent that executes the plan, and how to set up its reference    |
 
 ## Briefings
 
